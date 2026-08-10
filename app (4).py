@@ -208,8 +208,8 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
 
         if has_physical_violation:
             pred_label = 'abnormal'
-            final_score = round(min(1.0, max(score, raw_ml_scores[i])), 2)
-            sev = 'CRITICAL' if final_score >= 0.75 else 'HIGH'
+            final_score = round(min(1.0, max(0.75, 0.40 + score, raw_ml_scores[i])), 2)
+            sev = 'CRITICAL' if final_score >= 0.85 else 'HIGH'
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
             elif "震動" in str(reasons):
@@ -340,24 +340,33 @@ def main():
     # Dynamic Streaming Row-by-Row Simulation Control
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚡ 即時動態串流 (Live Stream Mode)")
-    stream_active = st.sidebar.toggle("開啟動態一筆一筆計入模式", value=False, help="模擬動態時序數據一筆一筆進入，即時計算並更新儀表板")
+    stream_active = st.sidebar.toggle(
+        "⚡ 一鍵開啟動態串流 (每 3 秒自動計入 1 筆)",
+        value=False,
+        help="開啟後系統每 3 秒自動將下一筆感測器時序數據加入分析並即時更新儀表板，無需手動點擊"
+    )
+
+    total_raw_rows = len(raw_df)
 
     if stream_active:
         if 'stream_count' not in st.session_state:
-            st.session_state.stream_count = 10
+            st.session_state.stream_count = 1
 
-        col_s1, col_s2, col_s3 = st.sidebar.columns(3)
-        if col_s1.button("➕ 計入 1 筆"):
-            st.session_state.stream_count = min(len(raw_df), st.session_state.stream_count + 1)
+        st.sidebar.info(f"""🔴 **自動串流動態播報中**
+- 當前累積進度：`{st.session_state.stream_count} / {total_raw_rows}` 筆
+- 更新步調：**每 3 秒自動新增 1 筆時序資料**""")
+
+        col_s1, col_s2 = st.sidebar.columns(2)
+        if col_s1.button("🔄 重頭開始串流", use_container_width=True):
+            st.session_state.stream_count = 1
             st.rerun()
-        if col_s2.button("▶️ 進 10 筆"):
-            st.session_state.stream_count = min(len(raw_df), st.session_state.stream_count + 10)
-            st.rerun()
-        if col_s3.button("🔄 重置"):
-            st.session_state.stream_count = 10
+        if col_s2.button("⏩ 一次載入全部", use_container_width=True):
+            st.session_state.stream_count = total_raw_rows
             st.rerun()
 
-        st.sidebar.caption(f"🔴 動態串流中：已一筆一筆計入前 {st.session_state.stream_count} / {len(raw_df)} 筆資料")
+        if st.session_state.stream_count >= total_raw_rows:
+            st.sidebar.success(f"✅ 已完成全量 {total_raw_rows} 筆數據動態串流！")
+
         raw_df = raw_df.iloc[:st.session_state.stream_count]
 
     st.sidebar.download_button(
@@ -509,6 +518,12 @@ def main():
         display_df.style.apply(style_abnormal_rows, axis=1),
         use_container_width=True
     )
+
+    # 3-Second Auto-Advance Loop for Live Stream Mode
+    if stream_active and st.session_state.get('stream_count', 0) < total_raw_rows:
+        time.sleep(3)
+        st.session_state.stream_count += 1
+        st.rerun()
 
 if __name__ == "__main__":
     main()
