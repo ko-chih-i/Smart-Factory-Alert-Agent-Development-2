@@ -166,6 +166,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             raw_ml_scores.append(0.0)
 
     reasons_list, warning_reasons, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], [], []
+    is_temp_anom_list, is_press_anom_list, is_vib_anom_list = [], [], []
 
     for i in range(len(clean_df)):
         row = clean_df.iloc[i]
@@ -194,12 +195,10 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
         is_iso_outlier = (iso_preds[i] == -1)
 
         # 多重條件過濾 (Debounce / Persistent Check)
-        # 條件 1: 孤立森林連續 5 分鐘都判定離群 (Score > 0.6)
         start_i = max(0, i - 4)
         window_len = i - start_i + 1
         is_persistent_ml = (window_len >= 5) and all(raw_ml_scores[k] > 0.6 for k in range(start_i, i + 1))
 
-        # 條件 2: 伴隨微幅上升趨勢 (5分鐘區間內 溫度/壓力/震動 微升)
         temp_trend = clean_df.iloc[i]['temp'] - clean_df.iloc[start_i]['temp']
         press_trend = clean_df.iloc[i]['pressure'] - clean_df.iloc[start_i]['pressure']
         vib_trend = clean_df.iloc[i]['vibration'] - clean_df.iloc[start_i]['vibration']
@@ -229,6 +228,38 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
             final_score = 0.0
 
+        # Determine specific feature anomaly channels
+        temp_viol = (row['temp'] > 52.0) or (row['temp'] < 43.0)
+        press_viol = (row['pressure'] > 1.08) or (row['pressure'] < 0.97)
+        vib_viol = (row['vibration'] > 0.07)
+
+        if has_physical_violation:
+            is_temp_anom = temp_viol
+            is_press_anom = press_viol
+            is_vib_anom = vib_viol
+        elif is_debounced_warning:
+            is_temp_anom = (temp_trend > 0.1) or (abs(clean_df.iloc[i]['temp_z']) >= 1.5)
+            is_press_anom = (press_trend > 0.008) or (abs(clean_df.iloc[i]['pressure_z']) >= 1.5)
+            is_vib_anom = (vib_trend > 0.002) or (abs(clean_df.iloc[i]['vibration_z']) >= 1.5)
+
+            if not (is_temp_anom or is_press_anom or is_vib_anom):
+                max_z_idx = int(np.argmax([
+                    abs(clean_df.iloc[i]['temp_z']),
+                    abs(clean_df.iloc[i]['pressure_z']),
+                    abs(clean_df.iloc[i]['vibration_z'])
+                ]))
+                is_temp_anom = (max_z_idx == 0)
+                is_press_anom = (max_z_idx == 1)
+                is_vib_anom = (max_z_idx == 2)
+        else:
+            is_temp_anom = False
+            is_press_anom = False
+            is_vib_anom = False
+
+        is_temp_anom_list.append(is_temp_anom)
+        is_press_anom_list.append(is_press_anom)
+        is_vib_anom_list.append(is_vib_anom)
+
         reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_iso_outlier else "正常"))
         warning_reasons.append(warn_reason)
         severities.append(sev)
@@ -242,6 +273,9 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
     clean_df['warning_reason'] = warning_reasons
     clean_df['root_cause'] = reasons_list
     clean_df['action_suggestion'] = actions
+    clean_df['is_temp_anom'] = is_temp_anom_list
+    clean_df['is_press_anom'] = is_press_anom_list
+    clean_df['is_vib_anom'] = is_vib_anom_list
     if 'label' in clean_df.columns:
         clean_df['gt_match'] = (clean_df['predicted_label'] == clean_df['label']).map({True: '✓ 一致 (Match)', False: '✗ 差異 (Diff)'})
     return clean_df, imputed_info
@@ -440,19 +474,22 @@ def main():
     fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316', width=2)), row=1, col=1)
     fig_ts.add_hline(y=52, line_dash="dash", line_color="#ef4444", annotation_text="上限 52°C", row=1, col=1)
     fig_ts.add_hline(y=43, line_dash="dash", line_color="#ef4444", annotation_text="下限 43°C", row=1, col=1)
-    if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='預測異常 (溫度)', marker=dict(color='#ef4444', size=8, symbol='x')), row=1, col=1)
+    temp_anom_df = processed_df[processed_df['is_temp_anom']]
+    if len(temp_anom_df) > 0:
+        fig_ts.add_trace(go.Scatter(x=temp_anom_df['timestamp'], y=temp_anom_df['temp'], mode='markers', name='預測異常 (溫度)', marker=dict(color='#ef4444', size=8, symbol='x')), row=1, col=1)
 
     fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#3b82f6', width=2)), row=2, col=1)
     fig_ts.add_hline(y=1.08, line_dash="dash", line_color="#ef4444", annotation_text="上限 1.08 bar", row=2, col=1)
     fig_ts.add_hline(y=0.97, line_dash="dash", line_color="#ef4444", annotation_text="下限 0.97 bar", row=2, col=1)
-    if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['pressure'], mode='markers', name='預測異常 (壓力)', marker=dict(color='#ef4444', size=8, symbol='x')), row=2, col=1)
+    press_anom_df = processed_df[processed_df['is_press_anom']]
+    if len(press_anom_df) > 0:
+        fig_ts.add_trace(go.Scatter(x=press_anom_df['timestamp'], y=press_anom_df['pressure'], mode='markers', name='預測異常 (壓力)', marker=dict(color='#ef4444', size=8, symbol='x')), row=2, col=1)
 
     fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#a855f7', width=2)), row=3, col=1)
     fig_ts.add_hline(y=0.07, line_dash="dash", line_color="#ef4444", annotation_text="上限 0.07 g", row=3, col=1)
-    if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['vibration'], mode='markers', name='預測異常 (震動)', marker=dict(color='#ef4444', size=8, symbol='x')), row=3, col=1)
+    vib_anom_df = processed_df[processed_df['is_vib_anom']]
+    if len(vib_anom_df) > 0:
+        fig_ts.add_trace(go.Scatter(x=vib_anom_df['timestamp'], y=vib_anom_df['vibration'], mode='markers', name='預測異常 (震動)', marker=dict(color='#ef4444', size=8, symbol='x')), row=3, col=1)
 
     fig_ts.update_layout(paper_bgcolor='#0b132b', plot_bgcolor='#0b132b', font=dict(color='#e2e8f0'), height=680, hovermode="x unified", showlegend=False)
     fig_ts.update_xaxes(gridcolor='#1e293b')
