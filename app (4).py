@@ -340,9 +340,12 @@ def main():
     critical_count = len(processed_df[processed_df['severity'] == 'CRITICAL'])
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("機台當前狀態", f"{current_sev} ({'正常' if current_sev == 'NORMAL' else '需注意'})", delta=f"最新快照 {latest_time}", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
+    status_text = "正常" if current_sev == 'NORMAL' else "需注意"
+    m1.metric("機台當前狀態", f"{current_sev}", delta=f"快照 {latest_time} ({status_text})", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
     m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta="Isolation Forest ML")
-    m3.metric("當前異常真因", f"{latest_cause}", delta=f"{latest_action}")
+    
+    short_action = latest_action if len(latest_action) <= 20 else f"{latest_action[:18]}..."
+    m3.metric("當前異常真因", f"{latest_cause}", delta=f"{short_action}")
 
     st.caption(f"📊 **Ground Truth 比對正確率**: {accuracy:.1f}% ({gt_matches}/{total_count} Match) | 區間累積警報: {abnormal_count} 筆 ({anomaly_rate:.1f}% 異常率) | 緊急警報 (CRITICAL): {critical_count} 筆")
 
@@ -364,8 +367,7 @@ def main():
     )
     st.plotly_chart(fig_ts, use_container_width=True)
 
-    st.subheader("🚨 設備異常警報紀錄 (Reverse Chronological Order - 最新時間優先)")
-    st.info("💡 **即時巡檢優化 (Reverse Chronological Order)**：數據日誌（Alert Table）已優化為**最新時間優先**呈現，確保最新時間點之 CRITICAL / HIGH 警報第一時間於畫面頂部顯現。")
+    st.subheader("🚨 設備異常警報清單與 Agent 預測標籤 (Predicted Label)")
     st.dataframe(
         processed_df.iloc[::-1][['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
         use_container_width=True
