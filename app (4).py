@@ -124,7 +124,7 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
 
 # Pipeline Function
 def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"):
-    clean_df = df.copy()
+    clean_df = df.copy().reset_index(drop=True)
     imputed_info = []
 
     for col in ['temp', 'pressure', 'vibration']:
@@ -155,6 +155,13 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
     iso_forest.fit(clean_df[['temp', 'pressure', 'vibration']])
     iso_preds = iso_forest.predict(clean_df[['temp', 'pressure', 'vibration']])
     iso_scores = iso_forest.decision_function(clean_df[['temp', 'pressure', 'vibration']])
+
+    raw_ml_scores = []
+    for pred, score in zip(iso_preds, iso_scores):
+        if pred == -1 or score < 0:
+            raw_ml_scores.append(min(1.0, max(0.20, float(-score * 3.5))))
+        else:
+            raw_ml_scores.append(0.0)
 
     reasons_list, warning_reasons, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], [], []
 
