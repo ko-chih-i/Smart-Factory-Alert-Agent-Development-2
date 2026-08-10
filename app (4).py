@@ -227,8 +227,8 @@ def main():
     elif inject_missing:
         st.sidebar.success("🧹 已開啟遺失值檢查（數據完整或已自動補齊）")
 
-    st.title("🏭 智慧工廠設備異常警報 Streamlit 儀表板")
-    st.caption("即時感測器 telemetry 時序分析 (Plotly) | 孤立森林 ML | Ground Truth 比對與 Accuracy 評估")
+    st.title("🏭 智慧工廠設備異常警報儀表板")
+  
 
     # Documentation & System Architecture Expanders
     col_exp1, col_exp2 = st.columns(2)
