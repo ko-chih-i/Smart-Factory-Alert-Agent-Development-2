@@ -285,6 +285,9 @@ def main():
     st.sidebar.title("和碩 Pegatron 智慧工廠")
     st.sidebar.caption("Assignment 3 — Streamlit + Plotly 警報儀表板")
 
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ 1. 設定與生成 CSV 數據")
+
     num_rows = st.sidebar.slider("感測器筆數 (Rows)", 100, 500, 200, 50)
     anomaly_prob = st.sidebar.slider("異常機率", 0.05, 0.30, 0.12, 0.01)
     inject_missing = st.sidebar.toggle("可選遺失值處理 (Missing Values Imputation)", value=True, help="注入約 4% 感測器遺失值 (NaN) 並由 AI Agent 執行自動補值處理")
@@ -302,6 +305,13 @@ def main():
             help="選擇遺失值填補策略：連續時序數據推薦「線性插值」；狀態維持推薦「前向填補」；穩定數值推薦「中位數填補」"
         )
 
+    gen_csv_clicked = st.sidebar.button("🎲 生成 / 重新產生 CSV 數據檔", use_container_width=True)
+    if gen_csv_clicked:
+        st.session_state.test_executed = False
+        st.session_state.stream_count = 1
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📂 2. 手動上傳 CSV 檔案 (可選)")
     uploaded_file = st.sidebar.file_uploader("匯入感測器 CSV 檔案", type=["csv"])
 
     sample_csv_template = """timestamp,temp,pressure,vibration,label
@@ -323,29 +333,34 @@ def main():
     if uploaded_file is not None:
         raw_df = pd.read_csv(uploaded_file)
         raw_df.to_csv("sensor_data.csv", index=False)
+        st.sidebar.caption(f"✅ 已載入手動上傳檔: {uploaded_file.name} ({len(raw_df)} 筆)")
     else:
         raw_df = generate_sensor_data(num_rows=num_rows, anomaly_ratio=anomaly_prob, inject_missing=inject_missing)
         raw_df.to_csv("sensor_data.csv", index=False)
 
     csv_filepath = os.path.abspath("sensor_data.csv")
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("📂 CSV 數據檔與執行測試")
-    st.sidebar.info(f"""**CSV 儲存本機絕對路徑**：
+    st.sidebar.caption(f"📁 **數據檔已寫入本機絕對路徑**：
 {csv_filepath}
+*(共 {len(raw_df)} 筆感測紀錄)*")
 
-*(共 {len(raw_df)} 筆感測器資料)*""")
-
-    run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
-
-    # Dynamic Streaming Row-by-Row Simulation Control
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("⚡ 即時動態串流 (Live Stream Mode)")
-    stream_active = st.sidebar.toggle(
-        "⚡ 啟用 3 秒逐筆動態串流模式",
-        value=False,
-        help="開啟後，在點擊『開始執行 AI Agent 測試』後系統會每 3 秒自動新增 1 筆時序數據並即時更新儀表板"
+    st.sidebar.download_button(
+        label="📥 下載 CSV 數據檔 (sensor_data.csv)",
+        data=raw_df.to_csv(index=False).encode('utf-8'),
+        file_name="sensor_data.csv",
+        mime="text/csv",
+        help="下載當前生成的感測器原始資料 CSV 檔案"
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚡ 3. 執行模式選擇")
+    exec_mode = st.sidebar.radio(
+        "請選擇執行模式",
+        options=["靜態一次性載入分析", "動態 3 秒逐筆串流模式"],
+        index=0,
+        help="選擇『靜態』將一次性載入全部數據分析；選擇『動態』將在按下開始按鈕後，每 3 秒自動新增 1 筆數據"
+    )
+    stream_active = (exec_mode == "動態 3 秒逐筆串流模式")
 
     total_raw_rows = len(raw_df)
 
@@ -353,8 +368,8 @@ def main():
         if 'stream_count' not in st.session_state:
             st.session_state.stream_count = 1
 
-        st.sidebar.info(f"""🔴 **自動串流動態播報**
-- 當前累積進度：`{st.session_state.get('stream_count', 1)} / {total_raw_rows}` 筆
+        st.sidebar.info(f"""🔴 **動態串流模式預備**
+- 當前累積進度：{st.session_state.get('stream_count', 1)} / {total_raw_rows} 筆
 - 更新步調：**每 3 秒自動新增 1 筆**""")
 
         col_s1, col_s2 = st.sidebar.columns(2)
@@ -368,13 +383,9 @@ def main():
         if st.session_state.get('stream_count', 1) >= total_raw_rows:
             st.sidebar.success(f"✅ 已完成全量 {total_raw_rows} 筆數據動態串流！")
 
-    st.sidebar.download_button(
-        label="📥 下載生成的假資料 CSV (sensor_data.csv)",
-        data=raw_df.to_csv(index=False).encode('utf-8'),
-        file_name="sensor_data.csv",
-        mime="text/csv",
-        help="下載當前儀表板生成的感測器假資料 CSV 檔案"
-    )
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🚀 4. 啟動測試")
+    run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
 
     st.title("🏭 智慧工廠設備異常警報 AI 儀表板 (Blue Theme)")
     st.caption("即時感測器串流 (溫度, 壓力, 震動) | 孤立森林 ML 與 Agent 預測標籤 (predicted_label) | Gemini 智慧維修建議")
