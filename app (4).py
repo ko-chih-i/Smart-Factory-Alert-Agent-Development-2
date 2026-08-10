@@ -340,9 +340,7 @@ def main():
 
     csv_filepath = os.path.abspath("sensor_data.csv")
 
-    st.sidebar.caption(f"📁 **數據檔已寫入本機絕對路徑**：
-{csv_filepath}
-*(共 {len(raw_df)} 筆感測紀錄)*")
+    st.sidebar.caption(f"📁 **數據檔名**：sensor_data.csv *(共 {len(raw_df)} 筆感測紀錄)*")
 
     st.sidebar.download_button(
         label="📥 下載 CSV 數據檔 (sensor_data.csv)",
@@ -390,7 +388,7 @@ def main():
     st.title("🏭 智慧工廠設備異常警報 AI 儀表板 (Blue Theme)")
     st.caption("即時感測器串流 (溫度, 壓力, 震動) | 孤立森林 ML 與 Agent 預測標籤 (predicted_label) | Gemini 智慧維修建議")
 
-    st.success(f"📂 **CSV 數據檔已成功寫入本機路徑**：{csv_filepath} （共 {len(raw_df)} 筆感測紀錄）")
+    st.success(f"📂 **CSV 數據檔已就緒**：sensor_data.csv （共 {len(raw_df)} 筆感測紀錄）")
 
     if 'test_executed' not in st.session_state:
         st.session_state.test_executed = False
@@ -401,11 +399,11 @@ def main():
             st.session_state.stream_count = 1
 
     if not st.session_state.test_executed:
-        st.warning("⏱️ **等待開始測試**：CSV 檔案已就緒寫入。請點擊下方按鈕或左側邊欄的 **「🚀 開始執行 AI Agent 測試」** 啟動檢測流程。")
+        st.warning("⏱️ **等待開始測試**：CSV 檔案已就緒。請點擊下方按鈕或左側邊欄的 **「🚀 開始執行 AI Agent 測試」** 啟動檢測流程。")
         col_act, col_prev = st.columns([1, 2])
         with col_act:
             st.markdown("### 📋 測試準備狀態")
-            st.markdown(f"- **數據來源**: sensor_data.csv\n- **本機檔案路徑**: {csv_filepath}\n- **數據總筆數**: {len(raw_df)} 筆")
+            st.markdown(f"- **數據來源**: sensor_data.csv\n- **數據總筆數**: {len(raw_df)} 筆")
             if st.button("🚀 開始執行 AI Agent 測試 (Start Test)", type="primary", key="tmpl_start_btn", use_container_width=True):
                 st.session_state.test_executed = True
                 if stream_active:
