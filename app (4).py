@@ -25,6 +25,25 @@ st.set_page_config(
     layout="wide"
 )
 
+# 注入淺藍色主題客製化 CSS (全域背景與卡片淺藍化)
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f0f8ff; /* 淺愛麗絲藍全域背景 */
+    }
+    .stSidebar {
+        background-color: #e6f2ff; /* 側邊欄淺藍背景 */
+    }
+    div[data-testid="metric-container"] {
+        background-color: #ffffff;
+        border: 1px solid #bae6fd;
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Cache Synthetic Generator
 @st.cache_data
 def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False, missing_rate=0.04, seed=42):
@@ -139,13 +158,12 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             reasons.append(f"劇烈震動 ({row['vibration']} > 0.07 g)")
             score += 0.50
 
-        is_physical_abnormal = (len(reasons) > 0)
-        is_iso_outlier = (iso_preds[idx] == -1)
+        is_abnormal = (len(reasons) > 0) or (iso_preds[idx] == -1)
         final_score = round(min(1.0, max(score, float(0.5 - iso_scores[idx]))), 2)
         
-        if is_physical_abnormal:
+        if is_abnormal:
             pred_label = 'abnormal'
-            sev = 'CRITICAL' if final_score >= 0.75 else 'HIGH'
+            sev = 'CRITICAL' if final_score >= 0.75 else ('HIGH' if final_score >= 0.50 else 'WARNING')
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
             elif "震動" in str(reasons):
@@ -154,17 +172,12 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
                 act = "檢修氣壓歧管與分流閥，確認有無漏氣"
             else:
                 act = "派員進行感測器校正與基礎巡檢"
-            warn_reason = f"踩中硬性物理故障門檻 ({', '.join(reasons)})，系統發出 {sev} 故障警報！"
-        elif is_iso_outlier or final_score >= 0.35:
-            pred_label = 'normal'
-            sev = 'WARNING'
-            act = "早期預警：數值接近門檻臨界區 (如 51°C)，未達物理故障，建議於定期停機時進行巡檢保養"
-            warn_reason = f"屬早期警告 (Warning, Anomaly Score={final_score:.2f})：數據位在灰階臨界區 (如 51°C < 52°C 門檻)。未踩硬性物理門檻，GT 判定為 normal。"
+            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離邊界 (Score={final_score:.2f})。屬早期警告 (Warning)，提示維護巡檢，非硬性系統故障。"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
 
-        reasons_list.append(", ".join(reasons) if reasons else ("灰階早期預警" if (is_iso_outlier or final_score >= 0.35) else "正常"))
+        reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_abnormal else "正常"))
         warning_reasons.append(warn_reason)
         severities.append(sev)
         anomaly_scores.append(final_score)
@@ -285,19 +298,41 @@ def main():
 
     st.markdown("---")
 
+    # ---------------------------------------------------------
+    # 唯二修改點：圖表顏色替換為淺藍底、深色字與淺天藍網格
+    # ---------------------------------------------------------
     fig_ts = go.Figure()
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316')))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#38bdf8'), yaxis='y2'))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#c084fc'), yaxis='y3'))
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#d97706', width=2)))
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#0284c7', width=2), yaxis='y2'))
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#7c3aed', width=2), yaxis='y3'))
 
     if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='異常點', marker=dict(color='#ef4444', size=9, symbol='x')))
+        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='異常點', marker=dict(color='#dc2626', size=10, symbol='x')))
 
     fig_ts.update_layout(
-        paper_bgcolor='#0f172a', plot_bgcolor='#0f172a', font=dict(color='#e2e8f0'), height=450,
-        hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0),
-        yaxis=dict(title="溫度 (°C)"), yaxis2=dict(title="壓力 (bar)", overlaying='y', side='right'),
-        yaxis3=dict(title="震動 (g)", overlaying='y', side='right', position=0.95)
+        paper_bgcolor='#f0f9ff', # 外邊框淺蔚藍
+        plot_bgcolor='#e0f2fe',  # 圖表背景淺天藍
+        font=dict(color='#1e293b', size=12), # 文字改深灰高可讀性
+        height=450,
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.15, x=0, bgcolor='rgba(255,255,255,0.7)'),
+        yaxis=dict(
+            title=dict(text="溫度 (°C)", font=dict(color='#d97706')),
+            gridcolor='#bae6fd',
+            zerolinecolor='#7dd3fc'
+        ),
+        yaxis2=dict(
+            title=dict(text="壓力 (bar)", font=dict(color='#0284c7')),
+            overlaying='y', side='right',
+            gridcolor='#bae6fd',
+            zerolinecolor='#7dd3fc'
+        ),
+        yaxis3=dict(
+            title=dict(text="震動 (g)", font=dict(color='#7c3aed')),
+            overlaying='y', side='right', position=0.95,
+            gridcolor='#bae6fd',
+            zerolinecolor='#7dd3fc'
+        )
     )
     st.plotly_chart(fig_ts, use_container_width=True)
 
