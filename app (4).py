@@ -65,6 +65,15 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
             vibration = round(random.uniform(0.02, 0.04), 2)
             label = 'normal'
 
+        # Round generated values cleanly
+        temp = round(float(temp), 1)
+        pressure = round(float(pressure), 2)
+        vibration = round(float(vibration), 2)
+
+        # Strictly determine ground truth label based on physical parameters
+        is_physically_abnormal = (temp > 52.0) or (temp < 43.0) or (pressure > 1.08) or (pressure < 0.97) or (vibration > 0.07)
+        label = 'abnormal' if is_physically_abnormal else 'normal'
+
         # Optional Missing Value Injection (~4% rate)
         if inject_missing and random.random() < missing_rate:
             target_col = random.choice(['temp', 'pressure', 'vibration'])
@@ -106,6 +115,10 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
 
             imputed_info.append(f"{col}: 填補 {missing_count} 筆 [{method_name}]")
 
+    clean_df['temp'] = clean_df['temp'].round(1)
+    clean_df['pressure'] = clean_df['pressure'].round(2)
+    clean_df['vibration'] = clean_df['vibration'].round(2)
+
     scaler = StandardScaler()
     scaled = scaler.fit_transform(clean_df[['temp', 'pressure', 'vibration']])
     clean_df['temp_z'], clean_df['pressure_z'], clean_df['vibration_z'] = scaled[:, 0], scaled[:, 1], scaled[:, 2]
@@ -139,12 +152,13 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             reasons.append(f"劇烈震動 ({row['vibration']} > 0.07 g)")
             score += 0.50
 
-        is_abnormal = (len(reasons) > 0) or (iso_preds[idx] == -1)
+        has_physical_violation = (len(reasons) > 0)
+        is_iso_outlier = (iso_preds[idx] == -1)
         final_score = round(min(1.0, max(score, float(0.5 - iso_scores[idx]))), 2)
         
-        if is_abnormal:
+        if has_physical_violation:
             pred_label = 'abnormal'
-            sev = 'CRITICAL' if final_score >= 0.75 else ('HIGH' if final_score >= 0.50 else 'WARNING')
+            sev = 'CRITICAL' if final_score >= 0.75 else 'HIGH'
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
             elif "震動" in str(reasons):
@@ -152,8 +166,11 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             elif "壓力" in str(reasons):
                 act = "檢修氣壓歧管與分流閥，確認有無漏氣"
             else:
-                act = "派員進行感測器校正與基礎巡檢"
-            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離邊界 (Score={final_score:.2f})。屬早期警告 (Warning)，提示維護巡檢，非硬性系統故障。"
+                act = "派員進行感測器校正與物理維修"
+            warn_reason = f"檢測到物理指標超標: {', '.join(reasons)}"
+        elif is_iso_outlier or final_score >= 0.30:
+            pred_label, sev, act = 'normal', 'WARNING', '派員進行感測器校正與預防性巡檢'
+            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離分佈 (Score={final_score:.2f})。屬早期警告 (Warning) 提示維護巡檢，物理數值尚未超標。"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
