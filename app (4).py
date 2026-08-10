@@ -181,18 +181,24 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             score += 0.50
 
         has_physical_violation = (len(reasons) > 0)
-        is_iso_outlier = (iso_preds[idx] == -1)
 
-        # ML anomaly score contribution: ONLY positive if ML flags as outlier (iso_preds == -1) or decision_function < 0
-        if is_iso_outlier or iso_scores[idx] < 0:
-            ml_contrib = min(1.0, max(0.20, float(-iso_scores[idx] * 3.5)))
-        else:
-            ml_contrib = 0.0
+        # 多重條件過濾 (Debounce / Persistent Check)
+        # 條件 1: 孤立森林連續 5 分鐘都判定離群 (Score > 0.6)
+        start_idx = max(0, idx - 4)
+        window_len = idx - start_idx + 1
+        is_persistent_ml = (window_len >= 5) and all(raw_ml_scores[k] > 0.6 for k in range(start_idx, idx + 1))
 
-        final_score = round(min(1.0, max(score, ml_contrib)), 2)
-        
+        # 條件 2: 伴隨微幅上升趨勢 (5分鐘區間內 溫度/壓力/震動 微升)
+        temp_trend = clean_df.iloc[idx]['temp'] - clean_df.iloc[start_idx]['temp']
+        press_trend = clean_df.iloc[idx]['pressure'] - clean_df.iloc[start_idx]['pressure']
+        vib_trend = clean_df.iloc[idx]['vibration'] - clean_df.iloc[start_idx]['vibration']
+        has_upward_trend = (temp_trend > 0.1) or (press_trend > 0.008) or (vib_trend > 0.002)
+
+        is_debounced_warning = is_persistent_ml and has_upward_trend
+
         if has_physical_violation:
             pred_label = 'abnormal'
+            final_score = round(min(1.0, max(score, raw_ml_scores[idx])), 2)
             sev = 'CRITICAL' if final_score >= 0.75 else 'HIGH'
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
@@ -203,9 +209,10 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             else:
                 act = "派員進行感測器校正與物理維修"
             warn_reason = f"檢測到物理指標超標: {', '.join(reasons)}"
-        elif is_iso_outlier or final_score >= 0.35:
+        elif is_debounced_warning:
             pred_label, sev, act = 'normal', 'WARNING', '派員進行感測器校正與預防性巡檢'
-            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離分佈 (Score={final_score:.2f})。屬早期警告 (WARNING) 提示維護巡檢，物理數值尚未超標。"
+            final_score = round(max(raw_ml_scores[idx], 0.61), 2)
+            warn_reason = f"【多重條件過濾通過】Isolation Forest 連續 5 分鐘離群 (Score={final_score:.2f} > 0.6) 且伴隨微幅上升趨勢，觸發預警 [WARNING]"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
