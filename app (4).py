@@ -295,10 +295,10 @@ def main():
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📂 CSV 數據檔與執行測試")
-    st.sidebar.info(f"**CSV 儲存本機絕對路徑**：
+    st.sidebar.info(f"""**CSV 儲存本機絕對路徑**：
 {csv_filepath}
 
-*(共 {len(raw_df)} 筆感測器資料)*")
+*(共 {len(raw_df)} 筆感測器資料)*""")
 
     run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
 
