@@ -179,9 +179,8 @@ def main():
     processed_df, imputed_info = run_anomaly_pipeline(raw_df)
 
     if imputed_info:
-        st.sidebar.info("🧹 自動數據清洗補值報告:
-" + "
-".join([f"• {info}" for info in imputed_info]))
+        msg_lines = ["🧹 自動數據清洗補值報告:"] + [f"• {info}" for info in imputed_info]
+        st.sidebar.info("\n".join(msg_lines))
     elif inject_missing:
         st.sidebar.success("🧹 已開啟遺失值檢查（數據完整或已自動補齊）")
 
