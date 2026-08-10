@@ -342,9 +342,9 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚡ 即時動態串流 (Live Stream Mode)")
     stream_active = st.sidebar.toggle(
-        "⚡ 一鍵開啟動態串流 (每 3 秒自動計入 1 筆)",
+        "⚡ 啟用 3 秒逐筆動態串流模式",
         value=False,
-        help="開啟後系統每 3 秒自動將下一筆感測器時序數據加入分析並即時更新儀表板，無需手動點擊"
+        help="開啟後，在點擊『開始執行 AI Agent 測試』後系統會每 3 秒自動新增 1 筆時序數據並即時更新儀表板"
     )
 
     total_raw_rows = len(raw_df)
@@ -353,22 +353,20 @@ def main():
         if 'stream_count' not in st.session_state:
             st.session_state.stream_count = 1
 
-        st.sidebar.info(f"""🔴 **自動串流動態播報中**
-- 當前累積進度：`{st.session_state.stream_count} / {total_raw_rows}` 筆
-- 更新步調：**每 3 秒自動新增 1 筆時序資料**""")
+        st.sidebar.info(f"""🔴 **自動串流動態播報**
+- 當前累積進度：`{st.session_state.get('stream_count', 1)} / {total_raw_rows}` 筆
+- 更新步調：**每 3 秒自動新增 1 筆**""")
 
         col_s1, col_s2 = st.sidebar.columns(2)
-        if col_s1.button("🔄 重頭開始串流", use_container_width=True):
+        if col_s1.button("🔄 重頭開始", use_container_width=True):
             st.session_state.stream_count = 1
             st.rerun()
         if col_s2.button("⏩ 一次載入全部", use_container_width=True):
             st.session_state.stream_count = total_raw_rows
             st.rerun()
 
-        if st.session_state.stream_count >= total_raw_rows:
+        if st.session_state.get('stream_count', 1) >= total_raw_rows:
             st.sidebar.success(f"✅ 已完成全量 {total_raw_rows} 筆數據動態串流！")
-
-        raw_df = raw_df.iloc[:st.session_state.stream_count]
 
     st.sidebar.download_button(
         label="📥 下載生成的假資料 CSV (sensor_data.csv)",
@@ -388,6 +386,8 @@ def main():
 
     if run_test_clicked:
         st.session_state.test_executed = True
+        if stream_active and 'stream_count' not in st.session_state:
+            st.session_state.stream_count = 1
 
     if not st.session_state.test_executed:
         st.warning("⏱️ **等待開始測試**：CSV 檔案已就緒寫入。請點擊下方按鈕或左側邊欄的 **「🚀 開始執行 AI Agent 測試」** 啟動檢測流程。")
@@ -397,6 +397,8 @@ def main():
             st.markdown(f"- **數據來源**: sensor_data.csv\n- **本機檔案路徑**: {csv_filepath}\n- **數據總筆數**: {len(raw_df)} 筆")
             if st.button("🚀 開始執行 AI Agent 測試 (Start Test)", type="primary", key="tmpl_start_btn", use_container_width=True):
                 st.session_state.test_executed = True
+                if stream_active:
+                    st.session_state.stream_count = 1
                 st.rerun()
 
         with col_prev:
@@ -404,6 +406,10 @@ def main():
             st.dataframe(raw_df.head(12), use_container_width=True)
 
         return
+
+    # Slice data for streaming mode ONLY AFTER test execution has started
+    if stream_active:
+        raw_df = raw_df.iloc[:st.session_state.get('stream_count', total_raw_rows)]
 
     processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
 
