@@ -264,6 +264,29 @@ def main():
     else:
         raw_df = generate_sensor_data(num_rows=num_rows, anomaly_ratio=anomaly_prob, inject_missing=inject_missing)
 
+    # Dynamic Streaming Row-by-Row Simulation Control
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚡ 即時動態串流 (Live Stream Mode)")
+    stream_active = st.sidebar.toggle("開啟動態一筆一筆計入模式", value=False, help="模擬動態時序數據一筆一筆進入，即時計算並更新儀表板")
+
+    if stream_active:
+        if 'stream_count' not in st.session_state:
+            st.session_state.stream_count = 10
+
+        col_s1, col_s2, col_s3 = st.sidebar.columns(3)
+        if col_s1.button("➕ 計入 1 筆"):
+            st.session_state.stream_count = min(len(raw_df), st.session_state.stream_count + 1)
+            st.rerun()
+        if col_s2.button("▶️ 進 10 筆"):
+            st.session_state.stream_count = min(len(raw_df), st.session_state.stream_count + 10)
+            st.rerun()
+        if col_s3.button("🔄 重置"):
+            st.session_state.stream_count = 10
+            st.rerun()
+
+        st.sidebar.caption(f"🔴 動態串流中：已一筆一筆計入前 {st.session_state.stream_count} / {len(raw_df)} 筆資料")
+        raw_df = raw_df.iloc[:st.session_state.stream_count]
+
     processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
 
     if imputed_info:
