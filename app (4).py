@@ -33,42 +33,69 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
     start_time = datetime.strptime("2024-06-03 19:05:00", "%Y-%m-%d %H:%M:%S")
     data = []
 
+    # Physical Machine State Tracker (Simulates real thermal inertia & mechanical continuity)
+    current_temp = 47.5
+    current_pressure = 1.025
+    current_vibration = 0.030
+
+    anomaly_phase_remaining = 0
+    current_anomaly_type = None
+
     for i in range(num_rows):
         current_time = (start_time + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S")
-        is_abnormal = random.random() < anomaly_ratio
+        
+        # Check if a new realistic machine fault event triggers (continuous duration)
+        if anomaly_phase_remaining <= 0:
+            if random.random() < (anomaly_ratio * 0.28):
+                anomaly_phase_remaining = random.randint(4, 11) # Event lasts 4-11 minutes continuously
+                current_anomaly_type = random.choice(['high_temp', 'low_temp', 'high_press', 'low_press', 'high_vib', 'compound'])
+            else:
+                current_anomaly_type = None
 
-        if is_abnormal:
-            anomaly_type = random.choice(['high_temp', 'low_temp', 'high_press', 'low_press', 'high_vib', 'compound'])
-            temp = round(random.uniform(45.0, 50.0), 1)
-            pressure = round(random.uniform(1.00, 1.05), 2)
-            vibration = round(random.uniform(0.02, 0.04), 2)
+        # Base normal physical setpoints with mild periodic motor load fluctuation (sine cycles)
+        cycle_phase = (i / 18.0) * math.pi * 2.0
+        target_normal_temp = 47.5 + 1.2 * math.sin(cycle_phase)
+        target_normal_press = 1.025 + 0.01 * math.cos(cycle_phase)
+        target_normal_vib = 0.030 + 0.004 * math.sin(cycle_phase * 2.0)
 
-            if anomaly_type == 'high_temp':
-                temp = round(random.uniform(52.1, 64.0), 1)
-            elif anomaly_type == 'low_temp':
-                temp = round(random.uniform(34.0, 42.5), 1)
-            elif anomaly_type == 'high_press':
-                pressure = round(random.uniform(1.09, 1.35), 2)
-            elif anomaly_type == 'low_press':
-                pressure = round(random.uniform(0.80, 0.96), 2)
-            elif anomaly_type == 'high_vib':
-                vibration = round(random.uniform(0.08, 0.18), 2)
-            elif anomaly_type == 'compound':
-                temp = round(random.uniform(53.0, 62.0), 1)
-                pressure = round(random.uniform(1.10, 1.25), 2)
-                vibration = round(random.uniform(0.08, 0.15), 2)
-            
-            label = 'abnormal'
-        else:
-            temp = round(random.uniform(45.0, 50.0), 1)
-            pressure = round(random.uniform(1.00, 1.05), 2)
-            vibration = round(random.uniform(0.02, 0.04), 2)
-            label = 'normal'
+        target_temp = target_normal_temp
+        target_press = target_normal_press
+        target_vib = target_normal_vib
 
-        # Round generated values cleanly
-        temp = round(float(temp), 1)
-        pressure = round(float(pressure), 2)
-        vibration = round(float(vibration), 2)
+        if anomaly_phase_remaining > 0 and current_anomaly_type:
+            anomaly_phase_remaining -= 1
+            if current_anomaly_type == 'high_temp':
+                target_temp = 53.5 + random.uniform(0.0, 6.5)
+            elif current_anomaly_type == 'low_temp':
+                target_temp = 36.0 + random.uniform(0.0, 5.0)
+            elif current_anomaly_type == 'high_press':
+                target_press = 1.10 + random.uniform(0.0, 0.15)
+            elif current_anomaly_type == 'low_press':
+                target_press = 0.85 + random.uniform(0.0, 0.10)
+            elif current_anomaly_type == 'high_vib':
+                target_vib = 0.08 + random.uniform(0.0, 0.06)
+            elif current_anomaly_type == 'compound':
+                target_temp = 54.0 + random.uniform(0.0, 5.0)
+                target_press = 1.12 + random.uniform(0.0, 0.10)
+                target_vib = 0.08 + random.uniform(0.0, 0.05)
+
+        # Apply thermal inertia & physical response smoothing (Auto-regressive process)
+        current_temp = 0.65 * current_temp + 0.35 * target_temp + (random.random() - 0.5) * 0.3
+        current_pressure = 0.70 * current_pressure + 0.30 * target_press + (random.random() - 0.5) * 0.006
+        current_vibration = 0.70 * current_vibration + 0.30 * target_vib + (random.random() - 0.5) * 0.002
+
+        temp = round(float(current_temp), 1)
+        pressure = round(float(current_pressure), 2)
+        vibration = round(float(current_vibration), 2)
+
+        # Keep normal operation strictly inside normal limits when no anomaly active
+        if not current_anomaly_type and anomaly_phase_remaining <= 0:
+            if temp > 50.0: temp = 49.8
+            if temp < 45.0: temp = 45.2
+            if pressure > 1.05: pressure = 1.04
+            if pressure < 1.00: pressure = 1.01
+            if vibration > 0.04: vibration = 0.038
+            if vibration < 0.02: vibration = 0.022
 
         # Strictly determine ground truth label based on physical parameters
         is_physically_abnormal = (temp > 52.0) or (temp < 43.0) or (pressure > 1.08) or (pressure < 0.97) or (vibration > 0.07)
