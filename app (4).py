@@ -182,7 +182,14 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
 
         has_physical_violation = (len(reasons) > 0)
         is_iso_outlier = (iso_preds[idx] == -1)
-        final_score = round(min(1.0, max(score, float(0.5 - iso_scores[idx]))), 2)
+
+        # ML anomaly score contribution: ONLY positive if ML flags as outlier (iso_preds == -1) or decision_function < 0
+        if is_iso_outlier or iso_scores[idx] < 0:
+            ml_contrib = min(1.0, max(0.20, float(-iso_scores[idx] * 3.5)))
+        else:
+            ml_contrib = 0.0
+
+        final_score = round(min(1.0, max(score, ml_contrib)), 2)
         
         if has_physical_violation:
             pred_label = 'abnormal'
@@ -196,12 +203,13 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             else:
                 act = "派員進行感測器校正與物理維修"
             warn_reason = f"檢測到物理指標超標: {', '.join(reasons)}"
-        elif is_iso_outlier or final_score >= 0.30:
+        elif is_iso_outlier or final_score >= 0.35:
             pred_label, sev, act = 'normal', 'WARNING', '派員進行感測器校正與預防性巡檢'
-            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離分佈 (Score={final_score:.2f})。屬早期警告 (Warning) 提示維護巡檢，物理數值尚未超標。"
+            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離分佈 (Score={final_score:.2f})。屬早期警告 (WARNING) 提示維護巡檢，物理數值尚未超標。"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
+            final_score = 0.0
 
         reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_iso_outlier else "正常"))
         warning_reasons.append(warn_reason)
