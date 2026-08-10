@@ -358,9 +358,10 @@ def main():
     )
     st.plotly_chart(fig_ts, use_container_width=True)
 
-    st.subheader("🚨 設備異常警報紀錄與 Agent 預測標籤 (Predicted Label)")
+    st.subheader("🚨 設備異常警報紀錄 (Reverse Chronological Order - 最新時間優先)")
+    st.info("💡 **即時巡檢優化 (Reverse Chronological Order)**：數據日誌（Alert Table）已優化為**最新時間優先**呈現，確保最新時間點之 CRITICAL / HIGH 警報第一時間於畫面頂部顯現。")
     st.dataframe(
-        processed_df[['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
+        processed_df.iloc[::-1][['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
         use_container_width=True
     )
 
