@@ -320,7 +320,14 @@ def main():
     latest_row = processed_df.iloc[-1] if len(processed_df) > 0 else None
     current_sev = latest_row['severity'] if latest_row is not None else 'NORMAL'
     latest_score = latest_row['anomaly_score'] if latest_row is not None else 0.0
-    latest_cause = latest_row['root_cause'] if (latest_row is not None and current_sev != 'NORMAL') else "無異常 (運作正常)"
+    latest_time = str(latest_row['timestamp']).split()[-1] if (latest_row is not None and 'timestamp' in latest_row) else "19:10:00"
+
+    if latest_row is not None and current_sev != 'NORMAL':
+        latest_cause = latest_row['root_cause'] if latest_row['root_cause'] else "設備異常"
+        latest_action = f"建議: {latest_row['action_suggestion']}" if latest_row['action_suggestion'] else "建議: 派員巡檢"
+    else:
+        latest_cause = "運作正常"
+        latest_action = "建議: 維持預防性維護"
 
     total_count = len(processed_df)
     abnormal_df = processed_df[processed_df['predicted_label'] == 'abnormal']
@@ -333,9 +340,9 @@ def main():
     critical_count = len(processed_df[processed_df['severity'] == 'CRITICAL'])
 
     m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("機台當前狀態", f"{current_sev}", delta="正常" if current_sev == 'NORMAL' else "需注意", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
-    m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta=f"Score: {latest_score:.2f}")
-    m3.metric("當前主要異常", f"{latest_cause}")
+    m1.metric("機台當前狀態", f"{current_sev} ({'正常' if current_sev == 'NORMAL' else '需注意'})", delta=f"最新快照 {latest_time}", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
+    m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta="Isolation Forest ML")
+    m3.metric("當前異常真因", f"{latest_cause}", delta=f"{latest_action}")
     m4.metric("區間累積警報", f"{abnormal_count} 筆", delta=f"{anomaly_rate:.1f}% 異常率", delta_color="inverse" if abnormal_count > 0 else "normal")
     m5.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
     m6.metric("緊急警報 (CRITICAL)", f"{critical_count} 筆", delta="CRITICAL" if critical_count > 0 else "0", delta_color="inverse")
