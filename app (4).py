@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 import random
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
@@ -165,7 +166,8 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
 
     reasons_list, warning_reasons, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], [], []
 
-    for idx, row in clean_df.iterrows():
+    for i in range(len(clean_df)):
+        row = clean_df.iloc[i]
         reasons = []
         score = 0.0
 
@@ -188,25 +190,25 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             score += 0.50
 
         has_physical_violation = (len(reasons) > 0)
-        is_iso_outlier = (iso_preds[idx] == -1)
+        is_iso_outlier = (iso_preds[i] == -1)
 
         # 多重條件過濾 (Debounce / Persistent Check)
         # 條件 1: 孤立森林連續 5 分鐘都判定離群 (Score > 0.6)
-        start_idx = max(0, idx - 4)
-        window_len = idx - start_idx + 1
-        is_persistent_ml = (window_len >= 5) and all(raw_ml_scores[k] > 0.6 for k in range(start_idx, idx + 1))
+        start_i = max(0, i - 4)
+        window_len = i - start_i + 1
+        is_persistent_ml = (window_len >= 5) and all(raw_ml_scores[k] > 0.6 for k in range(start_i, i + 1))
 
         # 條件 2: 伴隨微幅上升趨勢 (5分鐘區間內 溫度/壓力/震動 微升)
-        temp_trend = clean_df.iloc[idx]['temp'] - clean_df.iloc[start_idx]['temp']
-        press_trend = clean_df.iloc[idx]['pressure'] - clean_df.iloc[start_idx]['pressure']
-        vib_trend = clean_df.iloc[idx]['vibration'] - clean_df.iloc[start_idx]['vibration']
+        temp_trend = clean_df.iloc[i]['temp'] - clean_df.iloc[start_i]['temp']
+        press_trend = clean_df.iloc[i]['pressure'] - clean_df.iloc[start_i]['pressure']
+        vib_trend = clean_df.iloc[i]['vibration'] - clean_df.iloc[start_i]['vibration']
         has_upward_trend = (temp_trend > 0.1) or (press_trend > 0.008) or (vib_trend > 0.002)
 
         is_debounced_warning = is_persistent_ml and has_upward_trend
 
         if has_physical_violation:
             pred_label = 'abnormal'
-            final_score = round(min(1.0, max(score, raw_ml_scores[idx])), 2)
+            final_score = round(min(1.0, max(score, raw_ml_scores[i])), 2)
             sev = 'CRITICAL' if final_score >= 0.75 else 'HIGH'
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
@@ -219,7 +221,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             warn_reason = f"檢測到物理指標超標: {', '.join(reasons)}"
         elif is_debounced_warning:
             pred_label, sev, act = 'normal', 'WARNING', '派員進行感測器校正與預防性巡檢'
-            final_score = round(max(raw_ml_scores[idx], 0.61), 2)
+            final_score = round(max(raw_ml_scores[i], 0.61), 2)
             warn_reason = f"【多重條件過濾通過】Isolation Forest 連續 5 分鐘離群 (Score={final_score:.2f} > 0.6) 且伴隨微幅上升趨勢，觸發預警 [WARNING]"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
@@ -397,25 +399,43 @@ def main():
 
     st.markdown("---")
 
-    fig_ts = go.Figure()
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316')))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#60a5fa'), yaxis='y2'))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#c084fc'), yaxis='y3'))
-
-    if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='🤖 Agent 預測異常', marker=dict(color='#ef4444', size=9, symbol='x')))
-
-    fig_ts.update_layout(
-        paper_bgcolor='#0b132b', plot_bgcolor='#0b132b', font=dict(color='#e2e8f0'), height=450,
-        hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0),
-        yaxis=dict(title="溫度 (°C)"), yaxis2=dict(title="壓力 (bar)", overlaying='y', side='right'),
-        yaxis3=dict(title="震動 (g)", overlaying='y', side='right', position=0.95)
+    fig_ts = make_subplots(
+        rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06,
+        subplot_titles=('🌡️ 溫度時序分層趨勢 (°C)', '🗜️ 壓力時序分層趨勢 (bar)', '⚡ 震動時序分層趨勢 (g)')
     )
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316', width=2)), row=1, col=1)
+    fig_ts.add_hline(y=52, line_dash="dash", line_color="#ef4444", annotation_text="上限 52°C", row=1, col=1)
+    fig_ts.add_hline(y=43, line_dash="dash", line_color="#ef4444", annotation_text="下限 43°C", row=1, col=1)
+    if abnormal_count > 0:
+        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='預測異常 (溫度)', marker=dict(color='#ef4444', size=8, symbol='x')), row=1, col=1)
+
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#3b82f6', width=2)), row=2, col=1)
+    fig_ts.add_hline(y=1.08, line_dash="dash", line_color="#ef4444", annotation_text="上限 1.08 bar", row=2, col=1)
+    fig_ts.add_hline(y=0.97, line_dash="dash", line_color="#ef4444", annotation_text="下限 0.97 bar", row=2, col=1)
+    if abnormal_count > 0:
+        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['pressure'], mode='markers', name='預測異常 (壓力)', marker=dict(color='#ef4444', size=8, symbol='x')), row=2, col=1)
+
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#a855f7', width=2)), row=3, col=1)
+    fig_ts.add_hline(y=0.07, line_dash="dash", line_color="#ef4444", annotation_text="上限 0.07 g", row=3, col=1)
+    if abnormal_count > 0:
+        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['vibration'], mode='markers', name='預測異常 (震動)', marker=dict(color='#ef4444', size=8, symbol='x')), row=3, col=1)
+
+    fig_ts.update_layout(paper_bgcolor='#0b132b', plot_bgcolor='#0b132b', font=dict(color='#e2e8f0'), height=680, hovermode="x unified", showlegend=False)
+    fig_ts.update_xaxes(gridcolor='#1e293b')
+    fig_ts.update_yaxes(gridcolor='#1e293b')
     st.plotly_chart(fig_ts, use_container_width=True)
 
     st.subheader("🚨 設備異常警報清單與 Agent 預測標籤 (Predicted Label)")
+    def style_abnormal_rows(row):
+        is_abn = (str(row.get('predicted_label', '')).lower() == 'abnormal') or (str(row.get('label', '')).lower() == 'abnormal')
+        is_warn = (str(row.get('severity', '')).upper() in ['CRITICAL', 'HIGH', 'WARNING'])
+        if is_abn or is_warn:
+            return ['color: #ef4444; font-weight: bold; background-color: rgba(153, 27, 27, 0.25);' for _ in row]
+        return ['' for _ in row]
+
+    display_df = processed_df.iloc[::-1][['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']]
     st.dataframe(
-        processed_df.iloc[::-1][['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
+        display_df.style.apply(style_abnormal_rows, axis=1),
         use_container_width=True
     )
 
