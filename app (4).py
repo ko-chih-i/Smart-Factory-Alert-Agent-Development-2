@@ -286,8 +286,21 @@ def main():
 
     if uploaded_file is not None:
         raw_df = pd.read_csv(uploaded_file)
+        raw_df.to_csv("sensor_data.csv", index=False)
     else:
         raw_df = generate_sensor_data(num_rows=num_rows, anomaly_ratio=anomaly_prob, inject_missing=inject_missing)
+        raw_df.to_csv("sensor_data.csv", index=False)
+
+    csv_filepath = os.path.abspath("sensor_data.csv")
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📂 CSV 數據檔與執行測試")
+    st.sidebar.info(f"**CSV 儲存本機絕對路徑**：
+{csv_filepath}
+
+*(共 {len(raw_df)} 筆感測器資料)*")
+
+    run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
 
     # Dynamic Streaming Row-by-Row Simulation Control
     st.sidebar.markdown("---")
@@ -312,22 +325,42 @@ def main():
         st.sidebar.caption(f"🔴 動態串流中：已一筆一筆計入前 {st.session_state.stream_count} / {len(raw_df)} 筆資料")
         raw_df = raw_df.iloc[:st.session_state.stream_count]
 
-    processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
-
-    if imputed_info:
-        msg_lines = ["🧹 自動數據清洗補值報告:"] + [f"• {info}" for info in imputed_info]
-        st.sidebar.info("\n".join(msg_lines))
-    elif inject_missing:
-        st.sidebar.success("🧹 已開啟遺失值檢查（數據完整或已自動補齊）")
-
-    st.sidebar.markdown("---")
     st.sidebar.download_button(
         label="📥 下載生成的假資料 CSV (sensor_data.csv)",
-        data=processed_df.to_csv(index=False).encode('utf-8'),
+        data=raw_df.to_csv(index=False).encode('utf-8'),
         file_name="sensor_data.csv",
         mime="text/csv",
         help="下載當前儀表板生成的感測器假資料 CSV 檔案"
     )
+
+    st.title("🏭 智慧工廠設備異常警報 AI 儀表板 (Blue Theme)")
+    st.caption("即時感測器串流 (溫度, 壓力, 震動) | 孤立森林 ML 與 Agent 預測標籤 (predicted_label) | Gemini 智慧維修建議")
+
+    st.success(f"📂 **CSV 數據檔已成功寫入本機路徑**：{csv_filepath} （共 {len(raw_df)} 筆感測紀錄）")
+
+    if 'test_executed' not in st.session_state:
+        st.session_state.test_executed = False
+
+    if run_test_clicked or stream_active:
+        st.session_state.test_executed = True
+
+    if not st.session_state.test_executed:
+        st.warning("⏱️ **等待開始測試**：CSV 檔案已就緒寫入。請點擊下方按鈕或左側邊欄的 **「🚀 開始執行 AI Agent 測試」** 啟動檢測流程。")
+        col_act, col_prev = st.columns([1, 2])
+        with col_act:
+            st.markdown("### 📋 測試準備狀態")
+            st.markdown(f"- **數據來源**: sensor_data.csv\n- **本機檔案路徑**: {csv_filepath}\n- **數據總筆數**: {len(raw_df)} 筆")
+            if st.button("🚀 開始執行 AI Agent 測試 (Start Test)", type="primary", key="tmpl_start_btn", use_container_width=True):
+                st.session_state.test_executed = True
+                st.rerun()
+
+        with col_prev:
+            st.markdown("### 📄 產出之 CSV 原始數據預覽 (sensor_data.csv)")
+            st.dataframe(raw_df.head(12), use_container_width=True)
+
+        return
+
+    processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
 
     st.title("🏭 智慧工廠設備異常警報 Streamlit 儀表板")
     st.caption("即時感測器 telemetry 時序分析 (Plotly) | 孤立森林 ML | Ground Truth 比對與 Accuracy 評估")
