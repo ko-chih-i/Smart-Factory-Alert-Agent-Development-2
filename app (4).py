@@ -227,6 +227,15 @@ def main():
     elif inject_missing:
         st.sidebar.success("🧹 已開啟遺失值檢查（數據完整或已自動補齊）")
 
+    st.sidebar.markdown("---")
+    st.sidebar.download_button(
+        label="📥 下載生成的假資料 CSV (sensor_data.csv)",
+        data=processed_df.to_csv(index=False).encode('utf-8'),
+        file_name="sensor_data.csv",
+        mime="text/csv",
+        help="下載當前儀表板生成的感測器假資料 CSV 檔案"
+    )
+
     st.title("🏭 智慧工廠設備異常警報 Streamlit 儀表板")
     st.caption("即時感測器 telemetry 時序分析 (Plotly) | 孤立森林 ML | Ground Truth 比對與 Accuracy 評估")
 
