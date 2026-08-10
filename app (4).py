@@ -101,12 +101,12 @@ def run_anomaly_pipeline(df):
     scaled = scaler.fit_transform(clean_df[['temp', 'pressure', 'vibration']])
     clean_df['temp_z'], clean_df['pressure_z'], clean_df['vibration_z'] = scaled[:, 0], scaled[:, 1], scaled[:, 2]
 
-    iso_forest = IsolationForest(contamination=0.12, random_state=42)
+    iso_forest = IsolationForest(contamination='auto', random_state=42)
     iso_forest.fit(clean_df[['temp', 'pressure', 'vibration']])
     iso_preds = iso_forest.predict(clean_df[['temp', 'pressure', 'vibration']])
     iso_scores = iso_forest.decision_function(clean_df[['temp', 'pressure', 'vibration']])
 
-    reasons_list, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], []
+    reasons_list, warning_reasons, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], [], []
 
     for idx, row in clean_df.iterrows():
         reasons = []
@@ -144,10 +144,13 @@ def run_anomaly_pipeline(df):
                 act = "檢修氣壓歧管與分流閥，確認有無漏氣"
             else:
                 act = "派員進行感測器校正與基礎巡檢"
+            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離邊界 (Score={final_score:.2f})。屬早期警告 (Warning)，提示維護巡檢，非硬性系統故障。"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
+            warn_reason = '感測器數值在標準公差範圍內 (Normal)'
 
         reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_abnormal else "正常"))
+        warning_reasons.append(warn_reason)
         severities.append(sev)
         anomaly_scores.append(final_score)
         actions.append(act)
@@ -156,6 +159,7 @@ def run_anomaly_pipeline(df):
     clean_df['predicted_label'] = predicted_labels
     clean_df['severity'] = severities
     clean_df['anomaly_score'] = anomaly_scores
+    clean_df['warning_reason'] = warning_reasons
     clean_df['root_cause'] = reasons_list
     clean_df['action_suggestion'] = actions
     if 'label' in clean_df.columns:
