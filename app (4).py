@@ -266,38 +266,40 @@ def main():
     total_count = len(processed_df)
     abnormal_df = processed_df[processed_df['predicted_label'] == 'abnormal']
     abnormal_count = len(abnormal_df)
+    normal_count = total_count - abnormal_count
+    anomaly_rate = (abnormal_count / total_count * 100) if total_count > 0 else 0.0
 
     gt_matches = (processed_df['predicted_label'] == processed_df['label']).sum() if 'label' in processed_df.columns else total_count
     accuracy = (gt_matches / total_count * 100) if total_count > 0 else 100.0
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("總筆數", f"{total_count} 筆")
-    m2.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
-    m3.metric("正常狀態", f"{total_count - abnormal_count} 筆")
-    m4.metric("異常警報", f"{abnormal_count} 筆", delta=f"{abnormal_count/total_count*100:.1f}%", delta_color="inverse")
+    m2.metric("🤖 Agent 預測標籤", f"{abnormal_count} abnormal / {normal_count} normal")
+    m3.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
+    m4.metric("異常警報數量", f"{abnormal_count} 筆", delta=f"{anomaly_rate:.1f}%", delta_color="inverse")
     m5.metric("緊急警報", f"{len(processed_df[processed_df['severity']=='CRITICAL'])} 筆", delta_color="inverse")
 
     st.markdown("---")
 
     fig_ts = go.Figure()
     fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316')))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#38bdf8'), yaxis='y2'))
+    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#60a5fa'), yaxis='y2'))
     fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#c084fc'), yaxis='y3'))
 
     if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='異常點', marker=dict(color='#ef4444', size=9, symbol='x')))
+        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='🤖 Agent 預測異常', marker=dict(color='#ef4444', size=9, symbol='x')))
 
     fig_ts.update_layout(
-        paper_bgcolor='#0f172a', plot_bgcolor='#0f172a', font=dict(color='#e2e8f0'), height=450,
+        paper_bgcolor='#0b132b', plot_bgcolor='#0b132b', font=dict(color='#e2e8f0'), height=450,
         hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0),
         yaxis=dict(title="溫度 (°C)"), yaxis2=dict(title="壓力 (bar)", overlaying='y', side='right'),
         yaxis3=dict(title="震動 (g)", overlaying='y', side='right', position=0.95)
     )
     st.plotly_chart(fig_ts, use_container_width=True)
 
-    st.subheader("🚨 異常警報紀錄與 Gemini AI 建議處置")
+    st.subheader("🚨 設備異常警報紀錄與 Agent 預測標籤 (Predicted Label)")
     st.dataframe(
-        processed_df[['timestamp', 'temp', 'pressure', 'vibration', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
+        processed_df[['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']],
         use_container_width=True
     )
 
