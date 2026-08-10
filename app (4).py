@@ -175,7 +175,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
 
-        reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_abnormal else "正常"))
+        reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_iso_outlier else "正常"))
         warning_reasons.append(warn_reason)
         severities.append(sev)
         anomaly_scores.append(final_score)
