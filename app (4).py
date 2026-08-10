@@ -400,7 +400,7 @@ def main():
     st.sidebar.subheader("🚀 4. 啟動測試")
     run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
 
-    st.title("🏭 智慧工廠設備異常警報 AI 儀表板 (Blue Theme)")
+    st.title("🏭 智慧工廠設備異常警報儀表板")
 
     if 'test_executed' not in st.session_state:
         st.session_state.test_executed = False
