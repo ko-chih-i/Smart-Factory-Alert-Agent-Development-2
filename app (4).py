@@ -283,7 +283,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
 
 def main():
     st.sidebar.title("和碩 Pegatron 智慧工廠")
-    st.sidebar.caption("Assignment 3 — Streamlit + Plotly 警報儀表板")
+    st.sidebar.caption("警報儀表板")
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ 1. 設定與生成 CSV 數據")
@@ -433,8 +433,8 @@ def main():
 
     processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
 
-    st.title("🏭 智慧工廠設備異常警報 Streamlit 儀表板")
-    st.caption("即時感測器 telemetry 時序分析 (Plotly) | 孤立森林 ML | Ground Truth 比對與 Accuracy 評估")
+    st.title("🏭 智慧工廠設備異常警報儀表板")
+   
 
     # Documentation & System Architecture Expanders
     col_exp1, col_exp2 = st.columns(2)
