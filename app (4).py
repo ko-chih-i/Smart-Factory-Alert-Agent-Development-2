@@ -197,6 +197,23 @@ def main():
         )
 
     uploaded_file = st.sidebar.file_uploader("匯入感測器 CSV 檔案", type=["csv"])
+
+    sample_csv_template = """timestamp,temp,pressure,vibration,label
+2024-06-03 19:05:00,46.2,1.02,0.03,normal
+2024-06-03 19:06:00,47.1,1.01,0.02,normal
+2024-06-03 19:07:00,58.4,1.12,0.09,abnormal
+2024-06-03 19:08:00,45.8,1.03,0.03,normal
+2024-06-03 19:09:00,39.2,0.91,0.02,abnormal
+2024-06-03 19:10:00,48.0,1.04,0.04,normal"""
+
+    st.sidebar.download_button(
+        label="📄 下載 CSV 建議上傳範例 (.csv)",
+        data=sample_csv_template,
+        file_name="sample_sensor_upload.csv",
+        mime="text/csv",
+        help="點擊下載標準 CSV 範例檔，可直接作為自訂數據上傳範本"
+    )
+
     if uploaded_file is not None:
         raw_df = pd.read_csv(uploaded_file)
     else:
@@ -212,6 +229,39 @@ def main():
 
     st.title("🏭 智慧工廠設備異常警報 Streamlit 儀表板")
     st.caption("即時感測器 telemetry 時序分析 (Plotly) | 孤立森林 ML | Ground Truth 比對與 Accuracy 評估")
+
+    # Documentation & System Architecture Expanders
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        with st.expander("🧮 1. 怎麼算出 Anomaly Score？（分數算式說明）", expanded=False):
+            st.markdown("""
+            **Anomaly Score（異常預警指數）推導與計算機制**：
+            1. **Z-Score 特徵標準化**：
+               Z = (X - μ) / σ
+               對 '[temp, pressure, vibration]' 轉為標準常態分佈 N(0, 1)。
+            2. **Isolation Forest 孤立樹離群評估**：
+               模型計算決策分數 S_raw = decision_function([Z_temp, Z_press, Z_vib])。
+            3. **分數歸一化 (0% ~ 100%)**：
+               Anomaly Score = Clip((0.5 - S_raw) * 100%, 0%, 100%)
+            4. **預警層級劃分 (Warning Rating)**：
+               - '< 50%'：**NORMAL** (數據位於集中密度區)
+               - '50% ~ 65%'：**WARNING** (早期預警，提示排查保養)
+               - '65% ~ 80%'：**HIGH** (顯著偏離正常區間)
+               - '≥ 80%'：**CRITICAL** (極度離群或物理超標)
+            """)
+
+    with col_exp2:
+        with st.expander("📁 2. 上傳 CSV 建議格式規範與範例說明", expanded=False):
+            st.markdown("""
+            **上傳 CSV 建議欄位名稱與資料型別**：
+            - 'timestamp' *(建議)*：時間戳記，例如 '2024-06-03 19:05:00'
+            - 'temp' *(必填)*：設備溫度 (°C)，正常約 '45.0 ~ 50.0'
+            - 'pressure' *(必填)*：管線壓力 (bar)，正常約 '1.00 ~ 1.05'
+            - 'vibration' *(必填)*：三軸震動 (g)，正常約 '0.02 ~ 0.04'
+            - 'label' *(選填)*：實際標籤 ('normal' / 'abnormal')，若省略將由 Agent 進行 100% 無監督推論。
+
+            💡 *側面選單亦可點擊「下載 CSV 建議上傳範例」按鈕取得標籤範本。*
+            """)
 
     total_count = len(processed_df)
     abnormal_df = processed_df[processed_df['predicted_label'] == 'abnormal']
