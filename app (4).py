@@ -339,13 +339,12 @@ def main():
     accuracy = (gt_matches / total_count * 100) if total_count > 0 else 100.0
     critical_count = len(processed_df[processed_df['severity'] == 'CRITICAL'])
 
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1, m2, m3 = st.columns(3)
     m1.metric("機台當前狀態", f"{current_sev} ({'正常' if current_sev == 'NORMAL' else '需注意'})", delta=f"最新快照 {latest_time}", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
     m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta="Isolation Forest ML")
     m3.metric("當前異常真因", f"{latest_cause}", delta=f"{latest_action}")
-    m4.metric("區間累積警報", f"{abnormal_count} 筆", delta=f"{anomaly_rate:.1f}% 異常率", delta_color="inverse" if abnormal_count > 0 else "normal")
-    m5.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
-    m6.metric("緊急警報 (CRITICAL)", f"{critical_count} 筆", delta="CRITICAL" if critical_count > 0 else "0", delta_color="inverse")
+
+    st.caption(f"📊 **Ground Truth 比對正確率**: {accuracy:.1f}% ({gt_matches}/{total_count} Match) | 區間累積警報: {abnormal_count} 筆 ({anomaly_rate:.1f}% 異常率) | 緊急警報 (CRITICAL): {critical_count} 筆")
 
     st.markdown("---")
 
