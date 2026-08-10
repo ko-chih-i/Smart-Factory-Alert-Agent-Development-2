@@ -25,6 +25,27 @@ st.set_page_config(
     layout="wide"
 )
 
+# 注入淺藍色主題客製化 CSS
+st.markdown("""
+    <style>
+    /* 全域主背景與文字顏色調整為淺藍風格 */
+    .stApp {
+        background-color: #f0f8ff; /* 淺愛麗絲藍 */
+    }
+    .stSidebar {
+        background-color: #e6f2ff; /* 側邊欄稍深淺藍 */
+    }
+    /* 卡片與容器樣式 */
+    div[data-testid="metric-container"] {
+        background-color: #ffffff;
+        border: 1px solid #bae6fd;
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # Cache Synthetic Generator
 @st.cache_data
 def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False, missing_rate=0.04, seed=42):
@@ -153,7 +174,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
                 act = "檢修氣壓歧管與分流閥，確認有無漏氣"
             else:
                 act = "派員進行感測器校正與基礎巡檢"
-            warn_reason = f"Isolation Forest (contamination='auto') 檢測到特徵偏離邊界 (Score={final_score:.2f})。屬早期警告 (Warning)，提示維護巡檢，非硬性系統故障。"
+            warn_reason = f"Isolation Forest 檢測到特徵偏離邊界 (Score={final_score:.2f})。屬早期警告，提示維護巡檢。"
         else:
             pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
             warn_reason = '感測器數值在標準公差範圍內 (Normal)'
@@ -192,8 +213,7 @@ def main():
                 "前向填補 / LOCF (Forward Fill)",
                 "中位數填補 (Median Imputation)"
             ],
-            index=0,
-            help="選擇遺失值填補策略：連續時序數據推薦「線性插值」；狀態維持推薦「前向填補」；穩定數值推薦「中位數填補」"
+            index=0
         )
 
     uploaded_file = st.sidebar.file_uploader("匯入感測器 CSV 檔案", type=["csv"])
@@ -210,8 +230,7 @@ def main():
         label="📄 下載 CSV 建議上傳範例 (.csv)",
         data=sample_csv_template,
         file_name="sample_sensor_upload.csv",
-        mime="text/csv",
-        help="點擊下載標準 CSV 範例檔，可直接作為自訂數據上傳範本"
+        mime="text/csv"
     )
 
     if uploaded_file is not None:
@@ -224,43 +243,24 @@ def main():
     if imputed_info:
         msg_lines = ["🧹 自動數據清洗補值報告:"] + [f"• {info}" for info in imputed_info]
         st.sidebar.info("\n".join(msg_lines))
-    elif inject_missing:
-        st.sidebar.success("🧹 已開啟遺失值檢查（數據完整或已自動補齊）")
 
     st.title("🏭 智慧工廠設備異常警報儀表板")
-  
 
-    # Documentation & System Architecture Expanders
     col_exp1, col_exp2 = st.columns(2)
     with col_exp1:
         with st.expander("🧮 1. 怎麼算出 Anomaly Score？（分數算式說明）", expanded=False):
             st.markdown("""
-            **Anomaly Score（異常預警指數）推導與計算機制**：
-            1. **Z-Score 特徵標準化**：
-               Z = (X - μ) / σ
-               對 '[temp, pressure, vibration]' 轉為標準常態分佈 N(0, 1)。
-            2. **Isolation Forest 孤立樹離群評估**：
-               模型計算決策分數 S_raw = decision_function([Z_temp, Z_press, Z_vib])。
-            3. **分數歸一化 (0% ~ 100%)**：
-               Anomaly Score = Clip((0.5 - S_raw) * 100%, 0%, 100%)
-            4. **預警層級劃分 (Warning Rating)**：
-               - '< 50%'：**NORMAL** (數據位於集中密度區)
-               - '50% ~ 65%'：**WARNING** (早期預警，提示排查保養)
-               - '65% ~ 80%'：**HIGH** (顯著偏離正常區間)
-               - '≥ 80%'：**CRITICAL** (極度離群或物理超標)
+            **Anomaly Score 推導與計算機制**：
+            1. **Z-Score 特徵標準化**：Z = (X - μ) / σ
+            2. **Isolation Forest 孤立樹離群評估**：計算決策分數 S_raw。
+            3. **分數歸一化 (0% ~ 100%)**：Anomaly Score = Clip((0.5 - S_raw) * 100%, 0%, 100%)
             """)
 
     with col_exp2:
         with st.expander("📁 2. 上傳 CSV 建議格式規範與範例說明", expanded=False):
             st.markdown("""
             **上傳 CSV 建議欄位名稱與資料型別**：
-            - 'timestamp' *(建議)*：時間戳記，例如 '2024-06-03 19:05:00'
-            - 'temp' *(必填)*：設備溫度 (°C)，正常約 '45.0 ~ 50.0'
-            - 'pressure' *(必填)*：管線壓力 (bar)，正常約 '1.00 ~ 1.05'
-            - 'vibration' *(必填)*：三軸震動 (g)，正常約 '0.02 ~ 0.04'
-            - 'label' *(選填)*：實際標籤 ('normal' / 'abnormal')，若省略將由 Agent 進行 100% 無監督推論。
-
-            💡 *側面選單亦可點擊「下載 CSV 建議上傳範例」按鈕取得標籤範本。*
+            - 'timestamp'、'temp' (°C)、'pressure' (bar)、'vibration' (g)、'label' (normal/abnormal)
             """)
 
     total_count = len(processed_df)
@@ -279,19 +279,54 @@ def main():
 
     st.markdown("---")
 
+    # ---------------------------------------------------------
+    # 修改重點：Plotly 淺藍色系與高對比折線顏色設定
+    # ---------------------------------------------------------
     fig_ts = go.Figure()
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['temp'], mode='lines', name='溫度 (°C)', line=dict(color='#f97316')))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['pressure'], mode='lines', name='壓力 (bar)', line=dict(color='#38bdf8'), yaxis='y2'))
-    fig_ts.add_trace(go.Scatter(x=processed_df['timestamp'], y=processed_df['vibration'], mode='lines', name='震動 (g)', line=dict(color='#c084fc'), yaxis='y3'))
+    fig_ts.add_trace(go.Scatter(
+        x=processed_df['timestamp'], y=processed_df['temp'], 
+        mode='lines', name='溫度 (°C)', line=dict(color='#d97706', width=2) # 深橘色
+    ))
+    fig_ts.add_trace(go.Scatter(
+        x=processed_df['timestamp'], y=processed_df['pressure'], 
+        mode='lines', name='壓力 (bar)', line=dict(color='#0284c7', width=2), yaxis='y2' # 湛藍色
+    ))
+    fig_ts.add_trace(go.Scatter(
+        x=processed_df['timestamp'], y=processed_df['vibration'], 
+        mode='lines', name='震動 (g)', line=dict(color='#7c3aed', width=2), yaxis='y3' # 深紫色
+    ))
 
     if abnormal_count > 0:
-        fig_ts.add_trace(go.Scatter(x=abnormal_df['timestamp'], y=abnormal_df['temp'], mode='markers', name='異常點', marker=dict(color='#ef4444', size=9, symbol='x')))
+        fig_ts.add_trace(go.Scatter(
+            x=abnormal_df['timestamp'], y=abnormal_df['temp'], 
+            mode='markers', name='異常點', marker=dict(color='#dc2626', size=10, symbol='x') # 深紅色標記
+        ))
 
+    # 改為淺藍色背景底色 (`#f0f9ff` & `#e0f2fe`) 與深灰色文字 (`#1e293b`)
     fig_ts.update_layout(
-        paper_bgcolor='#0f172a', plot_bgcolor='#0f172a', font=dict(color='#e2e8f0'), height=450,
-        hovermode="x unified", legend=dict(orientation="h", y=1.15, x=0),
-        yaxis=dict(title="溫度 (°C)"), yaxis2=dict(title="壓力 (bar)", overlaying='y', side='right'),
-        yaxis3=dict(title="震動 (g)", overlaying='y', side='right', position=0.95)
+        paper_bgcolor='#f0f9ff',  # 外部邊框顏色：淺蔚藍
+        plot_bgcolor='#e0f2fe',   # 圖表畫布背景：柔和淺藍
+        font=dict(color='#1e293b', size=12), # 文字顏色：深灰（高可讀性）
+        height=450,
+        hovermode="x unified", 
+        legend=dict(orientation="h", y=1.15, x=0, bgcolor='rgba(255,255,255,0.6)'),
+        yaxis=dict(
+            title=dict(text="溫度 (°C)", font=dict(color='#d97706')),
+            gridcolor='#bae6fd', # 網格線改為淺藍色
+            zerolinecolor='#7dd3fc'
+        ), 
+        yaxis2=dict(
+            title=dict(text="壓力 (bar)", font=dict(color='#0284c7')),
+            overlaying='y', side='right',
+            gridcolor='#bae6fd',
+            zerolinecolor='#7dd3fc'
+        ),
+        yaxis3=dict(
+            title=dict(text="震動 (g)", font=dict(color='#7c3aed')),
+            overlaying='y', side='right', position=0.95,
+            gridcolor='#bae6fd',
+            zerolinecolor='#7dd3fc'
+        )
     )
     st.plotly_chart(fig_ts, use_container_width=True)
 
