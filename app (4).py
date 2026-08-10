@@ -289,6 +289,11 @@ def main():
             💡 *側面選單亦可點擊「下載 CSV 建議上傳範例」按鈕取得標籤範本。*
             """)
 
+    latest_row = processed_df.iloc[-1] if len(processed_df) > 0 else None
+    current_sev = latest_row['severity'] if latest_row is not None else 'NORMAL'
+    latest_score = latest_row['anomaly_score'] if latest_row is not None else 0.0
+    latest_cause = latest_row['root_cause'] if (latest_row is not None and current_sev != 'NORMAL') else "無異常 (運作正常)"
+
     total_count = len(processed_df)
     abnormal_df = processed_df[processed_df['predicted_label'] == 'abnormal']
     abnormal_count = len(abnormal_df)
@@ -297,13 +302,15 @@ def main():
 
     gt_matches = (processed_df['predicted_label'] == processed_df['label']).sum() if 'label' in processed_df.columns else total_count
     accuracy = (gt_matches / total_count * 100) if total_count > 0 else 100.0
+    critical_count = len(processed_df[processed_df['severity'] == 'CRITICAL'])
 
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("總筆數", f"{total_count} 筆")
-    m2.metric("🤖 Agent 預測標籤", f"{abnormal_count} abnormal / {normal_count} normal")
-    m3.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
-    m4.metric("異常警報數量", f"{abnormal_count} 筆", delta=f"{anomaly_rate:.1f}%", delta_color="inverse")
-    m5.metric("緊急警報", f"{len(processed_df[processed_df['severity']=='CRITICAL'])} 筆", delta_color="inverse")
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("機台當前狀態", f"{current_sev}", delta="正常" if current_sev == 'NORMAL' else "需注意", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
+    m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta=f"Score: {latest_score:.2f}")
+    m3.metric("當前主要異常", f"{latest_cause}")
+    m4.metric("區間累積警報", f"{abnormal_count} 筆", delta=f"{anomaly_rate:.1f}% 異常率", delta_color="inverse" if abnormal_count > 0 else "normal")
+    m5.metric("GT 比對正確率", f"{accuracy:.1f}%", delta=f"{gt_matches}/{total_count} Match")
+    m6.metric("緊急警報 (CRITICAL)", f"{critical_count} 筆", delta="CRITICAL" if critical_count > 0 else "0", delta_color="inverse")
 
     st.markdown("---")
 
