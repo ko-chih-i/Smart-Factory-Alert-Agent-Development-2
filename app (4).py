@@ -181,6 +181,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             score += 0.50
 
         has_physical_violation = (len(reasons) > 0)
+        is_iso_outlier = (iso_preds[idx] == -1)
 
         # 多重條件過濾 (Debounce / Persistent Check)
         # 條件 1: 孤立森林連續 5 分鐘都判定離群 (Score > 0.6)
