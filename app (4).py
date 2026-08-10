@@ -290,6 +290,13 @@ def main():
 
     num_rows = st.sidebar.slider("感測器筆數 (Rows)", 100, 500, 200, 50)
     anomaly_prob = st.sidebar.slider("異常機率", 0.05, 0.30, 0.12, 0.01)
+
+    if 'data_seed' not in st.session_state:
+        st.session_state.data_seed = 42
+
+    seed_input = st.sidebar.number_input("隨機種子 (Random Seed)", value=st.session_state.data_seed, step=1)
+    st.session_state.data_seed = seed_input
+
     inject_missing = st.sidebar.toggle("可選遺失值處理 (Missing Values Imputation)", value=True, help="注入約 4% 感測器遺失值 (NaN) 並由 AI Agent 執行自動補值處理")
 
     impute_method = "線性插值 (Linear Interpolation)"
@@ -307,8 +314,28 @@ def main():
 
     gen_csv_clicked = st.sidebar.button("🎲 生成 / 重新產生 CSV 數據檔", use_container_width=True)
     if gen_csv_clicked:
+        import random
+        st.session_state.data_seed = random.randint(1, 10000)
         st.session_state.test_executed = False
         st.session_state.stream_count = 1
+        st.rerun()
+
+    # Pre-generate CSV dataset based on Section 1 parameters
+    generated_df = generate_sensor_data(
+        num_rows=num_rows,
+        anomaly_ratio=anomaly_prob,
+        inject_missing=inject_missing,
+        seed=st.session_state.data_seed
+    )
+
+    st.sidebar.download_button(
+        label="📥 下載生成的 CSV 數據檔 (sensor_data.csv)",
+        data=generated_df.to_csv(index=False).encode('utf-8'),
+        file_name="sensor_data.csv",
+        mime="text/csv",
+        help="點擊下載當前根據設定產生的感測器原始數據 CSV 檔",
+        use_container_width=True
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📂 2. 手動上傳 CSV 檔案 (可選)")
@@ -327,7 +354,7 @@ def main():
         data=sample_csv_template,
         file_name="sample_sensor_upload.csv",
         mime="text/csv",
-        help="點擊下載標準 CSV 範例檔，可直接作為自訂數據上傳範本"
+        help="點擊下載標準 CSV 範例檔，可作為自訂數據上傳範本"
     )
 
     if uploaded_file is not None:
@@ -335,20 +362,8 @@ def main():
         raw_df.to_csv("sensor_data.csv", index=False)
         st.sidebar.caption(f"✅ 已載入手動上傳檔: {uploaded_file.name} ({len(raw_df)} 筆)")
     else:
-        raw_df = generate_sensor_data(num_rows=num_rows, anomaly_ratio=anomaly_prob, inject_missing=inject_missing)
+        raw_df = generated_df
         raw_df.to_csv("sensor_data.csv", index=False)
-
-    csv_filepath = os.path.abspath("sensor_data.csv")
-
-    st.sidebar.caption(f"📁 **數據檔名**：sensor_data.csv *(共 {len(raw_df)} 筆感測紀錄)*")
-
-    st.sidebar.download_button(
-        label="📥 下載 CSV 數據檔 (sensor_data.csv)",
-        data=raw_df.to_csv(index=False).encode('utf-8'),
-        file_name="sensor_data.csv",
-        mime="text/csv",
-        help="下載當前生成的感測器原始資料 CSV 檔案"
-    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚡ 3. 執行模式選擇")
@@ -386,9 +401,6 @@ def main():
     run_test_clicked = st.sidebar.button("🚀 開始執行 AI Agent 測試", type="primary", use_container_width=True)
 
     st.title("🏭 智慧工廠設備異常警報 AI 儀表板 (Blue Theme)")
-    st.caption("即時感測器串流 (溫度, 壓力, 震動) | 孤立森林 ML 與 Agent 預測標籤 (predicted_label) | Gemini 智慧維修建議")
-
-    st.success(f"📂 **CSV 數據檔已就緒**：sensor_data.csv （共 {len(raw_df)} 筆感測紀錄）")
 
     if 'test_executed' not in st.session_state:
         st.session_state.test_executed = False
@@ -399,7 +411,6 @@ def main():
             st.session_state.stream_count = 1
 
     if not st.session_state.test_executed:
-        st.warning("⏱️ **等待開始測試**：CSV 檔案已就緒。請點擊下方按鈕或左側邊欄的 **「🚀 開始執行 AI Agent 測試」** 啟動檢測流程。")
         col_act, col_prev = st.columns([1, 2])
         with col_act:
             st.markdown("### 📋 測試準備狀態")
