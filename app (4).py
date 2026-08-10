@@ -86,16 +86,25 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
     return pd.DataFrame(data)
 
 # Pipeline Function
-def run_anomaly_pipeline(df):
+def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"):
     clean_df = df.copy()
     imputed_info = []
 
     for col in ['temp', 'pressure', 'vibration']:
         missing_count = clean_df[col].isnull().sum()
         if missing_count > 0:
-            median_val = clean_df[col].median()
-            clean_df[col] = clean_df[col].fillna(median_val)
-            imputed_info.append(f"{col}: 填補 {missing_count} 筆 (中位數={median_val:.2f})")
+            if "線性插值" in impute_method or "Linear" in impute_method:
+                clean_df[col] = clean_df[col].interpolate(method='linear').bfill().ffill()
+                method_name = "線性插值 (Linear)"
+            elif "前向填補" in impute_method or "LOCF" in impute_method or "Forward" in impute_method:
+                clean_df[col] = clean_df[col].ffill().bfill()
+                method_name = "前向填補 (Forward Fill / LOCF)"
+            else:
+                median_val = clean_df[col].median()
+                clean_df[col] = clean_df[col].fillna(median_val)
+                method_name = f"中位數 ({median_val:.2f})"
+
+            imputed_info.append(f"{col}: 填補 {missing_count} 筆 [{method_name}]")
 
     scaler = StandardScaler()
     scaled = scaler.fit_transform(clean_df[['temp', 'pressure', 'vibration']])
@@ -172,7 +181,20 @@ def main():
 
     num_rows = st.sidebar.slider("感測器筆數 (Rows)", 100, 500, 200, 50)
     anomaly_prob = st.sidebar.slider("異常機率", 0.05, 0.30, 0.12, 0.01)
-    inject_missing = st.sidebar.toggle("可選遺失值處理 (Missing Values Imputation)", value=True, help="注入約 4% 感測器遺失值 (NaN) 並由 AI Agent 執行中位數自動補值處理")
+    inject_missing = st.sidebar.toggle("可選遺失值處理 (Missing Values Imputation)", value=True, help="注入約 4% 感測器遺失值 (NaN) 並由 AI Agent 執行自動補值處理")
+
+    impute_method = "線性插值 (Linear Interpolation)"
+    if inject_missing:
+        impute_method = st.sidebar.selectbox(
+            "填補演算法 (Imputation Strategy)",
+            options=[
+                "線性插值 (Linear Interpolation)",
+                "前向填補 / LOCF (Forward Fill)",
+                "中位數填補 (Median Imputation)"
+            ],
+            index=0,
+            help="選擇遺失值填補策略：連續時序數據推薦「線性插值」；狀態維持推薦「前向填補」；穩定數值推薦「中位數填補」"
+        )
 
     uploaded_file = st.sidebar.file_uploader("匯入感測器 CSV 檔案", type=["csv"])
     if uploaded_file is not None:
@@ -180,7 +202,7 @@ def main():
     else:
         raw_df = generate_sensor_data(num_rows=num_rows, anomaly_ratio=anomaly_prob, inject_missing=inject_missing)
 
-    processed_df, imputed_info = run_anomaly_pipeline(raw_df)
+    processed_df, imputed_info = run_anomaly_pipeline(raw_df, impute_method=impute_method)
 
     if imputed_info:
         msg_lines = ["🧹 自動數據清洗補值報告:"] + [f"• {info}" for info in imputed_info]
