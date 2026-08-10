@@ -10,6 +10,7 @@
 
 import streamlit as st
 import os
+import time
 import pandas as pd
 import numpy as np
 import math
@@ -385,7 +386,7 @@ def main():
     if 'test_executed' not in st.session_state:
         st.session_state.test_executed = False
 
-    if run_test_clicked or stream_active:
+    if run_test_clicked:
         st.session_state.test_executed = True
 
     if not st.session_state.test_executed:
