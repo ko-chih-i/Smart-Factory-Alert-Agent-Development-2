@@ -369,11 +369,11 @@ def main():
     st.sidebar.subheader("⚡ 3. 執行模式選擇")
     exec_mode = st.sidebar.radio(
         "請選擇執行模式",
-        options=["靜態一次性載入分析", "動態 3 秒逐筆串流模式"],
+        options=["靜態一次性載入分析", "動態 1 秒逐筆串流模式"],
         index=0,
-        help="選擇『靜態』將一次性載入全部數據分析；選擇『動態』將在按下開始按鈕後，每 3 秒自動新增 1 筆數據"
+        help="選擇『靜態』將一次性載入全部數據分析；選擇『動態』將在按下開始按鈕後，每 1 秒自動新增 1 筆數據"
     )
-    stream_active = (exec_mode == "動態 3 秒逐筆串流模式")
+    stream_active = (exec_mode == "動態 1 秒逐筆串流模式")
 
     total_raw_rows = len(raw_df)
 
@@ -383,7 +383,7 @@ def main():
 
         st.sidebar.info(f"""🔴 **動態串流模式預備**
 - 當前累積進度：{st.session_state.get('stream_count', 1)} / {total_raw_rows} 筆
-- 更新步調：**每 3 秒自動新增 1 筆**""")
+- 更新步調：**每 1 秒自動新增 1 筆**""")
 
         col_s1, col_s2 = st.sidebar.columns(2)
         if col_s1.button("🔄 重頭開始", use_container_width=True):
@@ -542,9 +542,9 @@ def main():
         use_container_width=True
     )
 
-    # 3-Second Auto-Advance Loop for Live Stream Mode
+    # 1-Second Auto-Advance Loop for Live Stream Mode
     if stream_active and st.session_state.get('stream_count', 0) < total_raw_rows:
-        time.sleep(3)
+        time.sleep(1)
         st.session_state.stream_count += 1
         st.rerun()
 
