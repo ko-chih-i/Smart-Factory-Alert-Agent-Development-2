@@ -6,6 +6,12 @@
 執行方式:
   pip install -r requirements.txt
   streamlit run app.py
+
+分級邏輯 (v2 更新):
+  - 警告 (紅) : 物理指標超標 (依課程規格書門檻: temp>52/<43, pressure>1.08/<0.97, vibration>0.07)
+  - 預警 (黃) : 統計離群 (Modified Z-score, Median+MAD 穩健統計法, 參考 Iglewicz & Hoaglin 1993)
+                且持續一段時間 + 呈現上升趨勢，才升級為預警 (避免單點雜訊誤報)
+  - 正常 (綠) : 以上皆非
 """
 
 import streamlit as st
@@ -29,6 +35,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# ── 業界統計參數 (有依據，非隨意寫死) ──
+MODIFIED_Z_THRESHOLD = 3.5   # Iglewicz & Hoaglin (1993) 建議之穩健離群門檻
+TREND_Z_THRESHOLD = 2.0      # 早期預警敏感度：變化速率超出歷史波動 2 個穩健標準差
+DEBOUNCE_WINDOW = 5          # 業務規則 (非統計值)：對應每分鐘 1 筆採樣，持續 5 分鐘才視為有效趨勢
+
 # Cache Synthetic Generator
 @st.cache_data
 def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False, missing_rate=0.04, seed=42):
@@ -47,7 +58,7 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
 
     for i in range(num_rows):
         current_time = (start_time + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S")
-        
+
         # Check if a new realistic machine fault event triggers (continuous duration)
         if anomaly_phase_remaining <= 0:
             if random.random() < (anomaly_ratio * 0.28):
@@ -125,6 +136,14 @@ def generate_sensor_data(num_rows=200, anomaly_ratio=0.12, inject_missing=False,
 
     return pd.DataFrame(data)
 
+
+def _robust_std(series: pd.Series) -> float:
+    """用 MAD (Median Absolute Deviation) 估計穩健標準差，避免異常值污染統計基線。"""
+    med = series.median()
+    mad = (series - med).abs().median()
+    return float(mad * 1.4826) if mad > 1e-9 else float(series.std() + 1e-9)
+
+
 # Pipeline Function
 def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"):
     clean_df = df.copy().reset_index(drop=True)
@@ -159,12 +178,19 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
     iso_preds = iso_forest.predict(clean_df[['temp', 'pressure', 'vibration']])
     iso_scores = iso_forest.decision_function(clean_df[['temp', 'pressure', 'vibration']])
 
-    raw_ml_scores = []
-    for pred, score in zip(iso_preds, iso_scores):
-        if pred == -1 or score < 0:
-            raw_ml_scores.append(min(1.0, max(0.20, float(-score * 3.5))))
-        else:
-            raw_ml_scores.append(0.0)
+    # ── 業界作法：用穩健統計量 (Median + MAD) 動態算出離群門檻 ──
+    # 取代原本寫死的固定分數門檻 (如 0.6)
+    median_score = float(np.median(iso_scores))
+    mad_score = float(np.median(np.abs(iso_scores - median_score)))
+    mad_score = mad_score if mad_score > 1e-9 else 1e-9
+
+    def modified_z_score(score):
+        return 0.6745 * (score - median_score) / mad_score
+
+    # 用一階差分的穩健標準差，取代原本寫死的趨勢門檻 (0.1 / 0.008 / 0.002)
+    temp_diff_std = _robust_std(clean_df['temp'].diff().fillna(0))
+    press_diff_std = _robust_std(clean_df['pressure'].diff().fillna(0))
+    vib_diff_std = _robust_std(clean_df['vibration'].diff().fillna(0))
 
     reasons_list, warning_reasons, severities, anomaly_scores, actions, predicted_labels = [], [], [], [], [], []
     is_temp_anom_list, is_press_anom_list, is_vib_anom_list = [], [], []
@@ -172,45 +198,64 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
     for i in range(len(clean_df)):
         row = clean_df.iloc[i]
         reasons = []
-        score = 0.0
+        rule_score = 0.0
 
+        # ── Layer 1: 物理閾值判斷 (課程規格書門檻，直接採用不變) ──
         if row['temp'] > 52.0:
             reasons.append(f"過熱 ({row['temp']}°C > 52°C)")
-            score += 0.45
+            rule_score += 0.45
         elif row['temp'] < 43.0:
             reasons.append(f"過冷 ({row['temp']}°C < 43°C)")
-            score += 0.40
+            rule_score += 0.40
 
         if row['pressure'] > 1.08:
             reasons.append(f"壓力過高 ({row['pressure']} > 1.08 bar)")
-            score += 0.40
+            rule_score += 0.40
         elif row['pressure'] < 0.97:
             reasons.append(f"壓力過低 ({row['pressure']} < 0.97 bar)")
-            score += 0.35
+            rule_score += 0.35
 
         if row['vibration'] > 0.07:
             reasons.append(f"劇烈震動 ({row['vibration']} > 0.07 g)")
-            score += 0.50
+            rule_score += 0.50
 
         has_physical_violation = (len(reasons) > 0)
-        is_iso_outlier = (iso_preds[i] == -1)
 
-        # 多重條件過濾 (Debounce / Persistent Check)
-        start_i = max(0, i - 4)
+        # ── Layer 2: 統計離群判斷 (Modified Z-score，動態計算，非寫死) ──
+        mz = modified_z_score(iso_scores[i])
+        is_statistical_outlier = (mz > MODIFIED_Z_THRESHOLD) and (iso_preds[i] == -1)
+
+        # ── Layer 3: 趨勢判斷 (用該特徵自己的滾動窗口穩健標準差，非寫死數字) ──
+        start_i = max(0, i - (DEBOUNCE_WINDOW - 1))
         window_len = i - start_i + 1
-        is_persistent_ml = (window_len >= 5) and all(raw_ml_scores[k] > 0.6 for k in range(start_i, i + 1))
+        is_persistent = (window_len >= DEBOUNCE_WINDOW)
 
-        temp_trend = clean_df.iloc[i]['temp'] - clean_df.iloc[start_i]['temp']
-        press_trend = clean_df.iloc[i]['pressure'] - clean_df.iloc[start_i]['pressure']
-        vib_trend = clean_df.iloc[i]['vibration'] - clean_df.iloc[start_i]['vibration']
-        has_upward_trend = (temp_trend > 0.1) or (press_trend > 0.008) or (vib_trend > 0.002)
+        temp_trend = row['temp'] - clean_df.iloc[start_i]['temp']
+        press_trend = row['pressure'] - clean_df.iloc[start_i]['pressure']
+        vib_trend = row['vibration'] - clean_df.iloc[start_i]['vibration']
 
-        is_debounced_warning = is_persistent_ml and has_upward_trend
+        temp_trend_z = temp_trend / temp_diff_std
+        press_trend_z = press_trend / press_diff_std
+        vib_trend_z = vib_trend / vib_diff_std
 
+        has_upward_trend = (
+            (temp_trend_z > TREND_Z_THRESHOLD) or
+            (press_trend_z > TREND_Z_THRESHOLD) or
+            (vib_trend_z > TREND_Z_THRESHOLD)
+        )
+
+        is_early_warning = (
+            is_statistical_outlier and has_upward_trend and is_persistent and not has_physical_violation
+        )
+
+        # ── 三段式分級：警告(紅) / 預警(黃) / 正常(綠) ──
         if has_physical_violation:
             pred_label = 'abnormal'
-            final_score = round(min(1.0, max(0.75, 0.40 + score, raw_ml_scores[i])), 2)
-            sev = 'CRITICAL' if final_score >= 0.85 else 'HIGH'
+            sev = 'ALERT'
+            # 分數：至少 0.75 起跳，依規則超標程度往上加，供儀表板顯示用
+            final_score = round(min(1.0, max(0.75, 0.40 + rule_score)), 2)
+            root_cause = ", ".join(reasons)
+            warn_reason = f"檢測到物理指標超標 (依規格書門檻): {root_cause}"
             if "過熱" in str(reasons):
                 act = "檢查冷卻泵浦與水管流量，降低機台負載 25%"
             elif "震動" in str(reasons):
@@ -219,17 +264,28 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
                 act = "檢修氣壓歧管與分流閥，確認有無漏氣"
             else:
                 act = "派員進行感測器校正與物理維修"
-            warn_reason = f"檢測到物理指標超標: {', '.join(reasons)}"
-        elif is_debounced_warning:
-            pred_label, sev, act = 'normal', 'WARNING', '派員進行感測器校正與預防性巡檢'
-            final_score = round(max(raw_ml_scores[i], 0.61), 2)
-            warn_reason = f"【多重條件過濾通過】Isolation Forest 連續 5 分鐘離群 (Score={final_score:.2f} > 0.6) 且伴隨微幅上升趨勢，觸發預警 [WARNING]"
-        else:
-            pred_label, sev, act = 'normal', 'NORMAL', '設備運作正常，維持預防性維護'
-            warn_reason = '感測器數值在標準公差範圍內 (Normal)'
-            final_score = 0.0
 
-        # Determine specific feature anomaly channels
+        elif is_early_warning:
+            pred_label = 'normal'
+            sev = 'WARNING'
+            # 分數：依 Modified Z-score 超出門檻的程度，映射到 0.50~0.74 供顯示
+            excess = min(mz - MODIFIED_Z_THRESHOLD, 5.0) / 5.0
+            final_score = round(0.50 + excess * 0.24, 2)
+            root_cause = f"統計離群 (Modified Z-score = {mz:.2f} > {MODIFIED_Z_THRESHOLD})"
+            warn_reason = (f"【穩健統計法】連續 {window_len} 分鐘偏離正常分佈中心 "
+                            f"(Median+MAD)，且變化速率超出歷史波動 {TREND_Z_THRESHOLD} 個穩健標準差，"
+                            f"觸發早期預警 [WARNING]")
+            act = "派員進行感測器校正與預防性巡檢"
+
+        else:
+            pred_label = 'normal'
+            sev = 'NORMAL'
+            final_score = 0.0
+            root_cause = "無異常 (Normal)"
+            warn_reason = "感測器數值在統計正常範圍內"
+            act = "設備運作正常，維持預防性維護"
+
+        # Determine specific feature anomaly channels (for chart markers)
         temp_viol = (row['temp'] > 52.0) or (row['temp'] < 43.0)
         press_viol = (row['pressure'] > 1.08) or (row['pressure'] < 0.97)
         vib_viol = (row['vibration'] > 0.07)
@@ -238,20 +294,15 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
             is_temp_anom = temp_viol
             is_press_anom = press_viol
             is_vib_anom = vib_viol
-        elif is_debounced_warning:
-            is_temp_anom = (temp_trend > 0.1) or (abs(clean_df.iloc[i]['temp_z']) >= 1.5)
-            is_press_anom = (press_trend > 0.008) or (abs(clean_df.iloc[i]['pressure_z']) >= 1.5)
-            is_vib_anom = (vib_trend > 0.002) or (abs(clean_df.iloc[i]['vibration_z']) >= 1.5)
-
+        elif is_early_warning:
+            is_temp_anom = (temp_trend_z > TREND_Z_THRESHOLD)
+            is_press_anom = (press_trend_z > TREND_Z_THRESHOLD)
+            is_vib_anom = (vib_trend_z > TREND_Z_THRESHOLD)
             if not (is_temp_anom or is_press_anom or is_vib_anom):
-                max_z_idx = int(np.argmax([
-                    abs(clean_df.iloc[i]['temp_z']),
-                    abs(clean_df.iloc[i]['pressure_z']),
-                    abs(clean_df.iloc[i]['vibration_z'])
-                ]))
-                is_temp_anom = (max_z_idx == 0)
-                is_press_anom = (max_z_idx == 1)
-                is_vib_anom = (max_z_idx == 2)
+                max_idx = int(np.argmax([abs(temp_trend_z), abs(press_trend_z), abs(vib_trend_z)]))
+                is_temp_anom = (max_idx == 0)
+                is_press_anom = (max_idx == 1)
+                is_vib_anom = (max_idx == 2)
         else:
             is_temp_anom = False
             is_press_anom = False
@@ -261,7 +312,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
         is_press_anom_list.append(is_press_anom)
         is_vib_anom_list.append(is_vib_anom)
 
-        reasons_list.append(", ".join(reasons) if reasons else ("孤立森林離群" if is_iso_outlier else "正常"))
+        reasons_list.append(root_cause)
         warning_reasons.append(warn_reason)
         severities.append(sev)
         anomaly_scores.append(final_score)
@@ -280,6 +331,7 @@ def run_anomaly_pipeline(df, impute_method="線性插值 (Linear Interpolation)"
     if 'label' in clean_df.columns:
         clean_df['gt_match'] = (clean_df['predicted_label'] == clean_df['label']).map({True: '✓ 一致 (Match)', False: '✗ 差異 (Diff)'})
     return clean_df, imputed_info
+
 
 def main():
     st.sidebar.title("和碩 Pegatron 智慧工廠")
@@ -428,20 +480,28 @@ def main():
         col_exp1, col_exp2 = st.columns(2)
         with col_exp1:
             with st.expander("🧮 1. 怎麼算出 Anomaly Score？（分數算式說明）", expanded=False):
-                st.markdown("""
+                st.markdown(f"""
                 **Anomaly Score（異常預警指數）推導與計算機制**：
-                1. **Z-Score 特徵標準化**：
-                   Z = (X - μ) / σ
-                   對 '[temp, pressure, vibration]' 轉為標準常態分佈 N(0, 1)。
-                2. **Isolation Forest 孤立樹離群評估**：
-                   模型計算決策分數 S_raw = decision_function([Z_temp, Z_press, Z_vib])。
-                3. **分數歸一化 (0% ~ 100%)**：
-                   Anomaly Score = Clip((0.5 - S_raw) * 100%, 0%, 100%)
-                4. **預警層級劃分 (Warning Rating)**：
-                   - '< 50%'：**NORMAL** (數據位於集中密度區)
-                   - '50% ~ 65%'：**WARNING** (早期預警，提示排查保養)
-                   - '65% ~ 80%'：**HIGH** (顯著偏離正常區間)
-                   - '≥ 80%'：**CRITICAL** (極度離群或物理超標)
+
+                **第一層：物理規則判斷（警告 🔴）**
+                依課程規格書門檻直接判定：temp > 52°C 或 < 43°C、pressure > 1.08 或 < 0.97 bar、
+                vibration > 0.07 g，任一超標即判定為**警告 (ALERT)**，分數固定落在 0.75~1.0。
+
+                **第二層：統計離群判斷（預警 🟡）**
+                1. Isolation Forest 計算決策分數 'S = decision_function([temp, pressure, vibration])'
+                2. 用穩健統計量 **Median + MAD** (Median Absolute Deviation) 取代 Mean/Std，
+                   避免資料中既有異常值污染基線 (masking effect)：
+
+                   'Modified Z = 0.6745 × (S - median(S)) / MAD(S)'
+
+                   門檻採用 **Modified Z > {MODIFIED_Z_THRESHOLD}**
+                   (參考 Iglewicz & Hoaglin, 1993《How to Detect and Handle Outliers》建議值)
+                3. 同時要求連續 **{DEBOUNCE_WINDOW} 分鐘**呈現離群狀態，且變化速率超出該特徵歷史波動
+                   **{TREND_Z_THRESHOLD} 個穩健標準差**（用一階差分的 MAD 估計），才升級為預警，
+                   避免單點雜訊觸發誤報（警報疲勞 alert fatigue）。
+
+                **第三層：正常（綠 🟢）**
+                以上皆非，數值落於統計與規格正常範圍內。
                 """)
 
         with col_exp2:
@@ -480,22 +540,32 @@ def main():
     total_count = len(processed_df)
     abnormal_df = processed_df[processed_df['predicted_label'] == 'abnormal']
     abnormal_count = len(abnormal_df)
-    normal_count = total_count - abnormal_count
     anomaly_rate = (abnormal_count / total_count * 100) if total_count > 0 else 0.0
 
     gt_matches = (processed_df['predicted_label'] == processed_df['label']).sum() if 'label' in processed_df.columns else total_count
     accuracy = (gt_matches / total_count * 100) if total_count > 0 else 100.0
-    critical_count = len(processed_df[processed_df['severity'] == 'CRITICAL'])
+    alert_count = len(processed_df[processed_df['severity'] == 'ALERT'])
+    warning_count = len(processed_df[processed_df['severity'] == 'WARNING'])
 
-    m1, m2, m3 = st.columns(3)
+    # ── 狀態顏色對照：正常=綠 / 預警=黃 / 警告=紅 ──
+    sev_display_map = {
+        'NORMAL': ('正常', '🟢'),
+        'WARNING': ('預警', '🟡'),
+        'ALERT': ('警告', '🔴'),
+    }
+    sev_label, sev_icon = sev_display_map.get(current_sev, ('正常', '🟢'))
+
+    # ── 第一排：機台當前狀態 + 即時預警指數 (兩欄，避免擁擠) ──
+    m1, m2 = st.columns(2)
     status_text = "正常" if current_sev == 'NORMAL' else "需注意"
-    m1.metric("機台當前狀態", f"{current_sev}", delta=f"快照 {latest_time} ({status_text})", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
-    m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta="Isolation Forest ML")
-    
-    short_action = latest_action if len(latest_action) <= 20 else f"{latest_action[:18]}..."
-    m3.metric("當前異常真因", f"{latest_cause}", delta=f"{short_action}")
+    m1.metric("機台當前狀態", f"{sev_icon} {sev_label}", delta=f"快照 {latest_time} ({status_text})", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
+    m2.metric("即時預警指數", f"{latest_score*100:.1f}%", delta="Isolation Forest ML (Modified Z-score)")
 
-    st.caption(f"📊 **Ground Truth 比對正確率**: {accuracy:.1f}% ({gt_matches}/{total_count} Match) | 區間累積警報: {abnormal_count} 筆 ({anomaly_rate:.1f}% 異常率) | 緊急警報 (CRITICAL): {critical_count} 筆")
+    # ── 第二排：當前異常真因，獨立一整排，避免文字被截斷 ──
+    st.metric("當前異常真因", f"{latest_cause}", delta=f"{latest_action}", delta_color="normal" if current_sev == 'NORMAL' else "inverse")
+
+    st.caption(f"📊 **Ground Truth 比對正確率**: {accuracy:.1f}% ({gt_matches}/{total_count} Match) | "
+               f"🔴 警告 (ALERT): {alert_count} 筆 | 🟡 預警 (WARNING): {warning_count} 筆 | 總異常率: {anomaly_rate:.1f}%")
 
     st.markdown("---")
 
@@ -529,16 +599,18 @@ def main():
     st.plotly_chart(fig_ts, use_container_width=True)
 
     st.subheader("🚨 設備異常警報清單與 Agent 預測標籤 (Predicted Label)")
-    def style_abnormal_rows(row):
-        is_abn = (str(row.get('predicted_label', '')).lower() == 'abnormal') or (str(row.get('label', '')).lower() == 'abnormal')
-        is_warn = (str(row.get('severity', '')).upper() in ['CRITICAL', 'HIGH', 'WARNING'])
-        if is_abn or is_warn:
+
+    def style_severity_rows(row):
+        sev = str(row.get('severity', '')).upper()
+        if sev == 'ALERT':
             return ['color: #ef4444; font-weight: bold; background-color: rgba(153, 27, 27, 0.25);' for _ in row]
+        elif sev == 'WARNING':
+            return ['color: #eab308; font-weight: bold; background-color: rgba(161, 98, 7, 0.20);' for _ in row]
         return ['' for _ in row]
 
     display_df = processed_df.iloc[::-1][['timestamp', 'temp', 'pressure', 'vibration', 'predicted_label', 'label', 'gt_match', 'severity', 'anomaly_score', 'root_cause', 'action_suggestion']]
     st.dataframe(
-        display_df.style.apply(style_abnormal_rows, axis=1),
+        display_df.style.apply(style_severity_rows, axis=1),
         use_container_width=True
     )
 
